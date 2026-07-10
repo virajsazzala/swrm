@@ -1,14 +1,18 @@
 package bencode
 
 import (
+	"bytes"
 	"errors"
 	"strconv"
-	"bytes"
 )
 
 func Unmarshal(b []byte) (any, error) {
 	v, n, err := parseValue(b)
-	if err != nil || n < len(b) {
+	if err != nil {
+		return nil, err
+	}
+
+	if n < len(b) {
 		return nil, errors.New("Invalid Bencoded data")
 	}
 
@@ -17,11 +21,11 @@ func Unmarshal(b []byte) (any, error) {
 
 func parseInt(b []byte) (int, int, error) {
 	/*
-	note:
-		spec compliance
-		current impl also allows -42, -0, +42, 03, etc.
-		they are not allowed according to the spec.
-		must be fixed, to throw an error.
+		note:
+			spec compliance
+			current impl also allows -42, -0, +42, 03, etc.
+			they are not allowed according to the spec.
+			must be fixed, to throw an error.
 	*/
 
 	if len(b) == 0 || b[0] != 'i' {
@@ -43,8 +47,8 @@ func parseInt(b []byte) (int, int, error) {
 
 func parseString(b []byte) (string, int, error) {
 	/*
-	note:
-		leading zeros spec compliance - not done yet
+		note:
+			leading zeros spec compliance - not done yet
 	*/
 	i := bytes.IndexByte(b, ':')
 	if i == -1 {
@@ -64,7 +68,7 @@ func parseString(b []byte) (string, int, error) {
 	return string(s[:l]), l + i + 1, nil
 }
 
-func parseList (b []byte) ([]any, int, error) {
+func parseList(b []byte) ([]any, int, error) {
 	if len(b) == 0 || b[0] != 'l' {
 		return nil, 0, errors.New("Invalid Bencoded list")
 	}
@@ -92,7 +96,7 @@ func parseList (b []byte) ([]any, int, error) {
 	return list, i + 1, nil
 }
 
-func parseDict (b []byte) (map[string]any, int, error) {
+func parseDict(b []byte) (map[string]any, int, error) {
 	if len(b) == 0 || b[0] != 'd' {
 		return nil, 0, errors.New("Invalid Bencoded dictionary")
 	}
