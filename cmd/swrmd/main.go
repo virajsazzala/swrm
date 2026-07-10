@@ -1,13 +1,18 @@
 package main
 
 import (
+	"log"
+	"fmt"
+
 	"github.com/virajsazzala/swrm/internal/bencode"
 )
 
 func main() {
 	// test
-	bencode.Unmarshal([]byte("li42el3:abcee"))
-	bencode.Unmarshal([]byte("le"))
-	bencode.Unmarshal([]byte("i42e"))
-	bencode.Unmarshal([]byte("3:cat"))
+	v, err := bencode.Unmarshal([]byte("d3:foo3:bar4:listli1ei2eee"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("%+v\n", v)
 }

@@ -3,39 +3,16 @@ package bencode
 import (
 	"errors"
 	"strconv"
-	"fmt"
 	"bytes"
 )
 
-func Unmarshal(b []byte) {
-	/* 
-	    d4:name5:Alice3:agei25e4:tagsl3:cat3:doge5:metad6:admini1eee
+func Unmarshal(b []byte) (any, error) {
+	v, n, err := parseValue(b)
+	if err != nil || n < len(b) {
+		return nil, errors.New("Invalid Bencoded data")
+	}
 
-		int -> i<int>e
-		byte str -> <len>:<content>
-		list -> l<elements>e
-		dict -> d<keyvaluekeyvalue>e
-		d
-			4:name 5:Alice
-			3:age  i25e
-			4:tags l
-						3:cat
-						3:dog
-			       e
-			5:meta d
-						6:admin i1e
-			       e
-		e
-		{
-			"name" : "Alice",
-			"age"  : 25,
-			"tags" : ["cat", "dog"],
-			"meta" : {"admin" : 1}
-		}
-	*/ 	
-	
-	// test
-	fmt.Println(parseValue(b))
+	return v, nil
 }
 
 func parseInt(b []byte) (int, int, error) {
@@ -47,7 +24,7 @@ func parseInt(b []byte) (int, int, error) {
 		must be fixed, to throw an error.
 	*/
 
-	if (len(b) == 0 || b[0] != 'i') {
+	if len(b) == 0 || b[0] != 'i' {
 		return 0, 0, errors.New("Invalid Bencoded integer")
 	}
 	e := bytes.IndexByte(b, 'e')
@@ -87,7 +64,7 @@ func parseString(b []byte) (string, int, error) {
 	return string(s[:l]), l + i + 1, nil
 }
 
-func parseList (b []byte) (any, int, error) {
+func parseList (b []byte) ([]any, int, error) {
 	if len(b) == 0 || b[0] != 'l' {
 		return nil, 0, errors.New("Invalid Bencoded list")
 	}
@@ -115,8 +92,42 @@ func parseList (b []byte) (any, int, error) {
 	return list, i + 1, nil
 }
 
-func parseDict (b []byte) (any, int, error) {
-	return b, 0, nil
+func parseDict (b []byte) (map[string]any, int, error) {
+	if len(b) == 0 || b[0] != 'd' {
+		return nil, 0, errors.New("Invalid Bencoded dictionary")
+	}
+
+	dict := map[string]any{}
+	i := 1
+	for {
+		if i >= len(b) {
+			return nil, 0, errors.New("Unterminated Bencoded dictionary")
+		}
+
+		if b[i] == 'e' {
+			break
+		}
+
+		vs, ns, errs := parseString(b[i:])
+		if errs != nil {
+			return nil, 0, errors.New("Invalid Bencoded dictionary")
+		}
+		i = i + ns
+
+		if i >= len(b) || b[i] == 'e' {
+			return nil, 0, errors.New("Invalid Bencoded dictionary")
+		}
+
+		ve, ne, erre := parseValue(b[i:])
+		if erre != nil {
+			return nil, 0, errors.New("Invalid Bencoded dictionary")
+		}
+		i = i + ne
+
+		dict[vs] = ve
+	}
+
+	return dict, i + 1, nil
 }
 
 func parseValue(b []byte) (any, int, error) {
