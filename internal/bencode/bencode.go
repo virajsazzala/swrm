@@ -35,11 +35,7 @@ func Unmarshal(b []byte) {
 	*/ 	
 	
 	// test
-	s, n, err := parseString(b)
-	fmt.Println(s, n, err)
-
-	nu, bn, errn := parseInt(b)
-	fmt.Println(nu, bn, errn)
+	fmt.Println(parseValue(b))
 }
 
 func parseInt(b []byte) (int, int, error) {
@@ -89,4 +85,55 @@ func parseString(b []byte) (string, int, error) {
 	}
 
 	return string(s[:l]), l + i + 1, nil
+}
+
+func parseList (b []byte) (any, int, error) {
+	if len(b) == 0 || b[0] != 'l' {
+		return nil, 0, errors.New("Invalid Bencoded list")
+	}
+
+	list := []any{}
+	i := 1
+	for {
+		if i >= len(b) {
+			return nil, 0, errors.New("Unterminated Bencoded list")
+		}
+
+		if b[i] == 'e' {
+			break
+		}
+
+		v, n, err := parseValue(b[i:])
+		if err != nil {
+			return nil, 0, errors.New("Invalid Bencoded list")
+		}
+
+		list = append(list, v)
+		i = i + n
+	}
+
+	return list, i + 1, nil
+}
+
+func parseDict (b []byte) (any, int, error) {
+	return b, 0, nil
+}
+
+func parseValue(b []byte) (any, int, error) {
+	if len(b) == 0 {
+		return nil, 0, errors.New("Invalid Bencoded value")
+	}
+
+	switch {
+	case b[0] == 'i':
+		return parseInt(b)
+	case b[0] >= '0' && b[0] <= '9':
+		return parseString(b)
+	case b[0] == 'l':
+		return parseList(b)
+	case b[0] == 'd':
+		return parseDict(b)
+	default:
+		return nil, 0, errors.New("Invalid Bencoded value")
+	}
 }

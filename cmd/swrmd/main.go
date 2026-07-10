@@ -1,13 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"github.com/virajsazzala/swrm/internal/bencode"
 )
 
 func main() {
 	// test
-	inp := "i5432e"
-	bencode.Unmarshal([]byte(inp))
-	fmt.Println([]byte("23"))
+	bencode.Unmarshal([]byte("li42el3:abcee"))
+	bencode.Unmarshal([]byte("le"))
+	bencode.Unmarshal([]byte("i42e"))
+	bencode.Unmarshal([]byte("3:cat"))
 }
