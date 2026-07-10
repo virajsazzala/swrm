@@ -1,10 +1,13 @@
 package main
 
 import (
+	// "fmt"
 	"fmt"
 	"log"
 
+	"github.com/virajsazzala/swrm/internal/peer"
 	"github.com/virajsazzala/swrm/internal/torrent"
+	"github.com/virajsazzala/swrm/internal/tracker"
 )
 
 func main() {
@@ -14,5 +17,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("%+v\n", t)
+	i, err := peer.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	r, err := tracker.Announce(t, i, 6881)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("%+v\n", r)
 }
