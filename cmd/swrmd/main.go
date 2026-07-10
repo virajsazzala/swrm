@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/virajsazzala/swrm/internal/bencode"
+	"github.com/virajsazzala/swrm/internal/torrent"
 )
 
 func main() {
 	// test
-	v, err := bencode.Unmarshal([]byte("d3:foo3:bar4:listli1ei2eee"))
+	t, err := torrent.Open("./assets/torrent-files/debian-13.5.0-amd64-netinst.iso.torrent")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("%+v\n", v)
+	fmt.Printf("%+v\n", t)
 }

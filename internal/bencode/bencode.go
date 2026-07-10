@@ -19,7 +19,7 @@ func Unmarshal(b []byte) (any, error) {
 	return v, nil
 }
 
-func parseInt(b []byte) (int, int, error) {
+func parseInt(b []byte) (int64, int, error) {
 	/*
 		note:
 			spec compliance
@@ -37,7 +37,7 @@ func parseInt(b []byte) (int, int, error) {
 		return 0, 0, errors.New("Invalid Bencoded integer")
 	}
 
-	n, err := strconv.Atoi(string(b[1:e]))
+	n, err := strconv.ParseInt(string(b[1:e]), 10, 64)
 	if err != nil {
 		return 0, 0, errors.New("Invalid Bencoded integer")
 	}
