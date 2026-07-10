@@ -152,3 +152,16 @@ func parseValue(b []byte) (any, int, error) {
 		return nil, 0, errors.New("Invalid Bencoded value")
 	}
 }
+
+func ValueSize(b []byte) (int, error) {
+	_, v, err := parseValue(b)
+	if err != nil {
+		return 0, err
+	}
+
+	return v, nil
+}
+
+func ReadString(b []byte) (string, int, error) {
+	return parseString(b)
+}
