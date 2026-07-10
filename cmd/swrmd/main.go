@@ -7,7 +7,7 @@ import (
 
 func main() {
 	// test
-	inp := "5:hello"
+	inp := "i5432e"
 	bencode.Unmarshal([]byte(inp))
 	fmt.Println([]byte("23"))
 }

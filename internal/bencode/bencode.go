@@ -35,42 +35,58 @@ func Unmarshal(b []byte) {
 	*/ 	
 	
 	// test
-	n, err := parseString(b)
-	fmt.Println(n, err)
+	s, n, err := parseString(b)
+	fmt.Println(s, n, err)
+
+	nu, bn, errn := parseInt(b)
+	fmt.Println(nu, bn, errn)
 }
 
-func parseInt(b []byte) (int, error) {
+func parseInt(b []byte) (int, int, error) {
 	/*
 	note:
+		spec compliance
 		current impl also allows -42, -0, +42, 03, etc.
 		they are not allowed according to the spec.
 		must be fixed, to throw an error.
 	*/
 
-	l := len(b)
+	if (len(b) == 0 || b[0] != 'i') {
+		return 0, 0, errors.New("Invalid Bencoded integer")
+	}
+	e := bytes.IndexByte(b, 'e')
 
-	if l < 3 || b[0] != 'i' || b[l-1] != 'e' {
-		return 0, errors.New("Invalid Bencoded integer")
+	if e == -1 || e == 1 {
+		return 0, 0, errors.New("Invalid Bencoded integer")
 	}
 
-	return strconv.Atoi(string(b[1 : (l-1)]))
+	n, err := strconv.Atoi(string(b[1:e]))
+	if err != nil {
+		return 0, 0, errors.New("Invalid Bencoded integer")
+	}
+
+	return n, e + 1, nil
 }
 
-func parseString(b []byte) (string, error) {
+func parseString(b []byte) (string, int, error) {
+	/*
+	note:
+		leading zeros spec compliance - not done yet
+	*/
 	i := bytes.IndexByte(b, ':')
 	if i == -1 {
-		return "", errors.New("Invalid Bencoded byte string")
+		return "", 0, errors.New("Invalid Bencoded byte string")
 	}
 
 	l, err := strconv.Atoi(string(b[:i]))
-	if err != nil {
-		return "", errors.New("Invalid Bencoded byte string")
+	if err != nil || l < 0 {
+		return "", 0, errors.New("Invalid Bencoded byte string")
 	}
 
 	s := b[i+1:]
-	if len(s) != l {
-		return "", errors.New("Invalid Bencoded byte string")
+	if len(s) < l {
+		return "", 0, errors.New("Invalid Bencoded byte string")
 	}
 
-	return string(s), nil
+	return string(s[:l]), l + i + 1, nil
 }
