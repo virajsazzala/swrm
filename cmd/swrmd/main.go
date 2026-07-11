@@ -4,6 +4,7 @@ import (
 	// "fmt"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/virajsazzala/swrm/internal/peer"
 	"github.com/virajsazzala/swrm/internal/torrent"
@@ -28,4 +29,15 @@ func main() {
 	}
 
 	fmt.Printf("%+v\n", r)
+
+	for _, p := range r.Peers {
+		c, err := peer.Connect(p, 3*time.Second)
+		if err != nil {
+			continue
+		}
+
+		fmt.Printf("Successfully connected to: %s\n", c.Conn.RemoteAddr().String())
+		defer c.Conn.Close()
+		break
+	}
 }
