@@ -36,7 +36,16 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("Successfully connected to: %s\n", c.Conn.RemoteAddr().String())
+		addr := c.Conn.RemoteAddr().String()
+		fmt.Printf("Successfully connected to: %s\n", addr)
+		err = c.Handshake(t.InfoHash, i)
+		if err != nil {
+			fmt.Printf("Skipping bad peer %s: %v\n", addr, err)
+			continue
+		}
+
+		fmt.Printf("Successfully connected to: %s (%s)\n", string(c.PeerID[:]), addr)
+
 		defer c.Conn.Close()
 		break
 	}

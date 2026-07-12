@@ -6,6 +6,7 @@ import (
 	"net"
 )
 
+/* might move this to internal/peer/peer.go TBD*/
 type Peer struct {
 	IP   net.IP
 	Port uint16
