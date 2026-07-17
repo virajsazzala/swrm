@@ -10,8 +10,11 @@ import (
 )
 
 type Client struct {
-	Conn   net.Conn
-	PeerID [20]byte
+	Conn     net.Conn
+	PeerID   [20]byte
+	Bitfield Bitfield
+	Choked   bool
+	Interest bool
 }
 
 func Connect(peer tracker.Peer, to time.Duration) (*Client, error) {
