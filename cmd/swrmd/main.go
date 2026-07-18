@@ -31,7 +31,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("%+v\n", r)
+	//fmt.Printf("%+v\n", r)
 
 	/* reach out to peers */
 	for _, p := range r.Peers {
@@ -65,8 +65,6 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("---\nClient state: %+v\n---\n", c)
-
 		/* count pieces */
 		cp := 0
 		tp := len(t.Pieces)
@@ -75,8 +73,20 @@ func main() {
 				cp++
 			}
 		}
-		fmt.Printf("Client State\nPeer ID: %v\nPieces Available: %v/%v\nChoked: %v\nInterest: %v\n", string(c.PeerID[:]), cp, tp, c.Choked, c.Interest)
+		fmt.Printf("Client State\n\tPeer ID: %v\n\tPieces Available: %v/%v\n\tChoked: %v\n\tInterest: %v\n", string(c.PeerID[:]), cp, tp, c.Choked, c.Interest)
 
+		p, err := c.GetPiece(t, len(t.Pieces)-1)
+		if err != nil {
+			fmt.Printf("failed to download piece: %v\n", err)
+			continue
+		}
+		fmt.Println(t.Length)
+		fmt.Println(t.PieceLength)
+		fmt.Println(t.Length % int64(t.PieceLength))
+
+		fmt.Printf("Downloaded piece %d\n", p.ID)
+		fmt.Printf("Piece size: %d bytes\n", len(p.Data))
+		fmt.Printf("SHA-1 verification passed!\n")
 		break
 	}
 }
