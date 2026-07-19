@@ -11,11 +11,12 @@ import (
 )
 
 type Downloader struct {
-	Torrent  *torrent.Torrent
-	PeerID   [20]byte
-	Port     uint16
-	Peers    []tracker.Peer
-	Interval int64
+	Torrent        *torrent.Torrent
+	PeerID         [20]byte
+	Port           uint16
+	Peers          []tracker.Peer
+	ConnectedPeers []*peer.Client
+	Interval       int64
 }
 
 func New(tor *torrent.Torrent) (*Downloader, error) {
@@ -39,8 +40,9 @@ func (d *Downloader) Announce() error {
 	return nil
 }
 
-func (d *Downloader) GetReadyPeer() (*peer.Client, error) {
-	for _, p := range d.Peers {
+func (d *Downloader) ConnectPeers() error {
+	d.ConnectedPeers = nil
+	for i, p := range d.Peers {
 		client, err := peer.Connect(p, 3*time.Second)
 		if err != nil {
 			// maybe log not able to connect here, later.
@@ -65,10 +67,43 @@ func (d *Downloader) GetReadyPeer() (*peer.Client, error) {
 			continue
 		}
 
-		return client, nil
+		d.ConnectedPeers = append(d.ConnectedPeers, client)
+
+		fmt.Printf("Connected to peer %d\n", i+1)
 	}
 
-	return nil, fmt.Errorf("no usable peers found")
+	fmt.Printf("Total connected peers %d/%d\n", len(d.ConnectedPeers), len(d.Peers))
+
+	if len(d.ConnectedPeers) == 0 {
+		return fmt.Errorf("no peers connected")
+	}
+
+	return nil
+}
+
+func (d *Downloader) removeConnectedPeer(peer *peer.Client) {
+	for i, p := range d.ConnectedPeers {
+		if p == peer {
+			peer.Conn.Close()
+			d.ConnectedPeers = append(d.ConnectedPeers[:i], d.ConnectedPeers[i+1:]...)
+		}
+	}
+}
+
+func (d *Downloader) closeConnectedPeers() {
+	for _, p := range d.ConnectedPeers {
+		p.Conn.Close()
+	}
+}
+
+func (d *Downloader) findPeerWithPiece(pieceIndex int) (*peer.Client, error) {
+	for _, c := range d.ConnectedPeers {
+		if c.Bitfield.HasPiece(pieceIndex) {
+			return c, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no connected peer has the piece %d", pieceIndex)
 }
 
 func (d *Downloader) Download() error {
@@ -83,34 +118,22 @@ func (d *Downloader) Download() error {
 		return fmt.Errorf("error pre-allocating file size: %w", err)
 	}
 
-	client, err := d.GetReadyPeer()
-	if err != nil {
-		return fmt.Errorf("failed to get ready peer: %w", err)
+	if err := d.ConnectPeers(); err != nil {
+		return fmt.Errorf("failed to connect to peers: %w", err)
 	}
-	// client.Conn.Close()
+
+	defer d.closeConnectedPeers()
 
 	pieceCount := len(d.Torrent.Pieces)
 	for pieceIndex := 0; pieceIndex < pieceCount; {
-		if !client.Bitfield.HasPiece(pieceIndex) {
-			client.Conn.Close()
-
-			client, err = d.GetReadyPeer()
-			if err != nil {
-				return fmt.Errorf("failed to get ready peer: %w", err)
-			}
-
-			continue
+		client, err := d.findPeerWithPiece(pieceIndex)
+		if err != nil {
+			return fmt.Errorf("failed to get peer with piece %d: %w", pieceIndex, err)
 		}
 
 		piece, err := client.GetPiece(d.Torrent, pieceIndex)
 		if err != nil {
-			client.Conn.Close()
-
-			client, err = d.GetReadyPeer()
-			if err != nil {
-				return fmt.Errorf("failed to get ready peer: %w", err)
-			}
-
+			d.removeConnectedPeer(client)
 			continue
 		}
 
@@ -118,7 +141,6 @@ func (d *Downloader) Download() error {
 
 		_, err = f.WriteAt(piece.Data, offset)
 		if err != nil {
-			client.Conn.Close()
 			return fmt.Errorf("failed to write piece to file: %w", err)
 		}
 
@@ -128,6 +150,5 @@ func (d *Downloader) Download() error {
 		pieceIndex++
 	}
 
-	client.Conn.Close()
 	return nil
 }
