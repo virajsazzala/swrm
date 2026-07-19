@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/virajsazzala/swrm/internal/torrent"
 )
@@ -48,6 +49,7 @@ func (c *Client) downloadPiece(pieceIndex int, pieceLength int) ([]byte, error) 
 
 	waitlp:
 		for {
+			c.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 			msg, err := c.ReadMessage()
 			if err != nil {
 				return nil, fmt.Errorf("failed to read piece %v, block %v: %v\n", pieceIndex, offset, err)

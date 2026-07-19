@@ -1,6 +1,9 @@
 package peer
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 func (c *Client) Interested() error {
 	if err := c.WriteMessage(&Message{ID: MsgInterested}); err != nil {
@@ -12,6 +15,9 @@ func (c *Client) Interested() error {
 }
 
 func (c *Client) WaitForUnchoke() error {
+	c.Conn.SetDeadline(time.Now().Add(30 * time.Second))
+	defer c.Conn.SetDeadline(time.Time{})
+
 	for {
 		msg, err := c.ReadMessage()
 		if err != nil {

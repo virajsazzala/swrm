@@ -6,9 +6,14 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/virajsazzala/swrm/internal/torrent"
 )
+
+var httpClient = &http.Client{
+	Timeout: 15 * time.Second,
+}
 
 func Announce(tor *torrent.Torrent, peerID [20]byte, port uint16) (*Response, error) {
 	/*

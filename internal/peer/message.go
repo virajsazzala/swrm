@@ -18,6 +18,8 @@ const (
 	MsgCancel        = 8
 )
 
+const maxMessageLength = 1 << 20 // 1MB
+
 type Message struct {
 	ID        byte
 	Payload   []byte
@@ -43,6 +45,11 @@ func (c *Client) ReadMessage() (*Message, error) {
 	if length == 0 {
 		return &Message{Payload: nil, KeepAlive: true}, nil
 	}
+
+	if length > maxMessageLength {
+		return nil, fmt.Errorf("message length %d exceeds max allowed %d", length, maxMessageLength)
+	}
+
 	data := make([]byte, length)
 	_, err = io.ReadFull(c.Conn, data)
 	if err != nil {

@@ -3,6 +3,7 @@ package downloader
 import (
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/virajsazzala/swrm/internal/peer"
@@ -11,12 +12,13 @@ import (
 )
 
 type Downloader struct {
-	Torrent        *torrent.Torrent
-	PeerID         [20]byte
-	Port           uint16
-	Peers          []tracker.Peer
-	ConnectedPeers []*peer.Client
-	Interval       int64
+	Torrent       *torrent.Torrent
+	PeerID        [20]byte
+	Port          uint16
+	Peers         []tracker.Peer
+	Workers       []*Worker
+	PendingPieces []int
+	Interval      int64
 }
 
 func New(tor *torrent.Torrent) (*Downloader, error) {
@@ -41,69 +43,118 @@ func (d *Downloader) Announce() error {
 }
 
 func (d *Downloader) ConnectPeers() error {
-	d.ConnectedPeers = nil
+	d.Workers = nil
+
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
 	for i, p := range d.Peers {
-		client, err := peer.Connect(p, 3*time.Second)
-		if err != nil {
-			// maybe log not able to connect here, later.
-			continue
-		}
+		wg.Add(1)
+		go func(i int, p tracker.Peer) {
+			defer wg.Done()
 
-		err = client.Handshake(d.Torrent.InfoHash, d.PeerID)
-		if err != nil {
-			client.Conn.Close()
-			continue
-		}
+			client, err := peer.Connect(p, 3*time.Second)
+			if err != nil {
+				// maybe log not able to connect here, later.
+				return
+			}
 
-		err = client.Interested()
-		if err != nil {
-			client.Conn.Close()
-			continue
-		}
+			err = client.Handshake(d.Torrent.InfoHash, d.PeerID)
+			if err != nil {
+				client.Conn.Close()
+				return
+			}
 
-		err = client.WaitForUnchoke()
-		if err != nil {
-			client.Conn.Close()
-			continue
-		}
+			err = client.Interested()
+			if err != nil {
+				client.Conn.Close()
+				return
+			}
 
-		d.ConnectedPeers = append(d.ConnectedPeers, client)
+			err = client.WaitForUnchoke()
+			if err != nil {
+				client.Conn.Close()
+				return
+			}
 
-		fmt.Printf("Connected to peer %d\n", i+1)
+			worker := &Worker{
+				ID:      i + 1,
+				Client:  client,
+				Torrent: d.Torrent,
+				Jobs:    make(chan downloadJob),
+				Results: nil,
+			}
+
+			mu.Lock()
+			d.Workers = append(d.Workers, worker)
+			mu.Unlock()
+
+			fmt.Printf("Worker %d connected\n", worker.ID)
+		}(i, p)
 	}
 
-	fmt.Printf("Total connected peers %d/%d\n", len(d.ConnectedPeers), len(d.Peers))
+	wg.Wait()
 
-	if len(d.ConnectedPeers) == 0 {
+	if len(d.Workers) == 0 {
 		return fmt.Errorf("no peers connected")
 	}
 
 	return nil
 }
 
-func (d *Downloader) removeConnectedPeer(peer *peer.Client) {
-	for i, p := range d.ConnectedPeers {
-		if p == peer {
-			peer.Conn.Close()
-			d.ConnectedPeers = append(d.ConnectedPeers[:i], d.ConnectedPeers[i+1:]...)
+func (d *Downloader) initializePendingPieces() {
+	d.PendingPieces = make([]int, len(d.Torrent.Pieces))
+
+	for i := range d.PendingPieces {
+		d.PendingPieces[i] = i
+	}
+}
+
+func (d *Downloader) nextJob(worker *Worker) (*downloadJob, bool) {
+	for i, piece := range d.PendingPieces {
+		if !worker.Client.Bitfield.HasPiece(piece) {
+			continue
+		}
+
+		d.PendingPieces = append(d.PendingPieces[:i], d.PendingPieces[i+1:]...)
+
+		return &downloadJob{PieceIndex: piece}, true
+	}
+
+	return nil, false
+}
+
+func (d *Downloader) closeWorkers() {
+	for _, w := range d.Workers {
+		close(w.Jobs)
+		w.Client.Conn.Close()
+	}
+}
+
+func (d *Downloader) removeWorker(worker *Worker) {
+	worker.Client.Conn.Close()
+	close(worker.Jobs)
+
+	for i, w := range d.Workers {
+		if w == worker {
+			d.Workers = append(d.Workers[:i], d.Workers[i+1:]...)
+			return
 		}
 	}
 }
 
-func (d *Downloader) closeConnectedPeers() {
-	for _, p := range d.ConnectedPeers {
-		p.Conn.Close()
-	}
-}
+func (d *Downloader) startWorkers(results chan downloadResult) int {
+	active := 0
+	for _, worker := range d.Workers {
+		worker.Results = results
+		go worker.Run()
 
-func (d *Downloader) findPeerWithPiece(pieceIndex int) (*peer.Client, error) {
-	for _, c := range d.ConnectedPeers {
-		if c.Bitfield.HasPiece(pieceIndex) {
-			return c, nil
+		if job, ok := d.nextJob(worker); ok {
+			worker.Jobs <- *job
+			active++
 		}
 	}
-
-	return nil, fmt.Errorf("no connected peer has the piece %d", pieceIndex)
+	return active
 }
 
 func (d *Downloader) Download() error {
@@ -122,32 +173,64 @@ func (d *Downloader) Download() error {
 		return fmt.Errorf("failed to connect to peers: %w", err)
 	}
 
-	defer d.closeConnectedPeers()
+	defer d.closeWorkers()
 
+	d.initializePendingPieces()
+
+	results := make(chan downloadResult, len(d.Workers))
+
+	activeWorkers := d.startWorkers(results)
+
+	completed := 0
 	pieceCount := len(d.Torrent.Pieces)
-	for pieceIndex := 0; pieceIndex < pieceCount; {
-		client, err := d.findPeerWithPiece(pieceIndex)
-		if err != nil {
-			return fmt.Errorf("failed to get peer with piece %d: %w", pieceIndex, err)
-		}
 
-		piece, err := client.GetPiece(d.Torrent, pieceIndex)
-		if err != nil {
-			d.removeConnectedPeer(client)
+	for completed < pieceCount && activeWorkers > 0 {
+		result := <-results
+		activeWorkers--
+
+		if result.Err != nil {
+			fmt.Printf("worker %d failed piece %d: %v\n", result.Worker.ID, result.PieceIndex, result.Err)
+
+			d.removeWorker(result.Worker)
+			d.PendingPieces = append(d.PendingPieces, result.PieceIndex)
+
+			if len(d.Workers) == 0 {
+				if err := d.Announce(); err != nil {
+					return fmt.Errorf("couldn't find any peers while reannounce: %w", err)
+				}
+
+				if err := d.ConnectPeers(); err != nil {
+					return fmt.Errorf("couldn't connect to new peers: %w", err)
+				}
+
+				activeWorkers += d.startWorkers(results)
+			}
+
 			continue
 		}
 
-		offset := int64(pieceIndex * d.Torrent.PieceLength)
+		offset := int64(result.PieceIndex) * int64(d.Torrent.PieceLength)
 
-		_, err = f.WriteAt(piece.Data, offset)
+		_, err = f.WriteAt(result.Piece.Data, offset)
 		if err != nil {
-			return fmt.Errorf("failed to write piece to file: %w", err)
+			return fmt.Errorf("failed to writing piece: %w", err)
 		}
 
-		progress := float64(pieceIndex+1) / float64(pieceCount) * 100
-		fmt.Printf("Downloaded piece %d/%d (%.2f%%)\n", pieceIndex+1, pieceCount, progress)
+		completed++
 
-		pieceIndex++
+		progress := float64(completed) / float64(pieceCount) * 100
+		fmt.Printf("Downloaded piece %d (%d/%d, %.2f%%)\n", result.PieceIndex, completed, pieceCount, progress)
+		fmt.Printf("Pending=%d Active=%d Completed=%d\n", len(d.PendingPieces), activeWorkers, completed)
+
+		job, ok := d.nextJob(result.Worker)
+		if ok {
+			result.Worker.Jobs <- *job
+			activeWorkers++
+		}
+	}
+
+	if completed != pieceCount {
+		return fmt.Errorf("download incomplete")
 	}
 
 	return nil
