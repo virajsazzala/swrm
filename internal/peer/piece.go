@@ -20,6 +20,12 @@ type Piece struct {
 	Data []byte
 }
 
+const pipelineDepth = 5
+
+const blockTimeout = 30 * time.Second
+
+const blockSize = 16 * 1024
+
 func parseBlock(m *Message) (*Block, error) {
 	if m.ID != MsgPiece {
 		return nil, fmt.Errorf("message is not a piece")
@@ -38,58 +44,73 @@ func parseBlock(m *Message) (*Block, error) {
 
 func (c *Client) downloadPiece(pieceIndex int, pieceLength int) ([]byte, error) {
 	buf := make([]byte, pieceLength)
-	const blockSize = 16 * 1024
 
+	var offsets []int
 	for offset := 0; offset < pieceLength; offset += blockSize {
-		blockLength := min(blockSize, pieceLength-offset)
+		offsets = append(offsets, offset)
+	}
 
-		if err := c.Request(pieceIndex, offset, blockLength); err != nil {
-			return nil, fmt.Errorf("failed to get block %v for piece %v", offset, pieceIndex)
+	next := 0
+	received := 0
+
+	requestNext := func() error {
+		if next >= len(offsets) {
+			return nil
+		}
+		offset := offsets[next]
+		length := min(blockSize, pieceLength-offset)
+
+		if err := c.Request(pieceIndex, offset, length); err != nil {
+			return fmt.Errorf("failed to request block %d for piece %d: %w", offset, pieceIndex, err)
 		}
 
-	waitlp:
-		for {
-			c.Conn.SetReadDeadline(time.Now().Add(30 * time.Second))
-			msg, err := c.ReadMessage()
-			if err != nil {
-				return nil, fmt.Errorf("failed to read piece %v, block %v: %v\n", pieceIndex, offset, err)
+		next++
+		return nil
+	}
+
+	for i := 0; i < pipelineDepth && next < len(offsets); i++ {
+		if err := requestNext(); err != nil {
+			return nil, err
+		}
+	}
+
+	for received < len(offsets) {
+		if c.IsChoked() {
+			return nil, fmt.Errorf("peer choked us mid-piece %d", pieceIndex)
+		}
+
+		select {
+		case block, ok := <-c.blocks:
+			if !ok {
+				return nil, fmt.Errorf("connection closed while downloading piece %d", pieceIndex)
 			}
 
-			if msg.KeepAlive {
+			if block.Index != pieceIndex {
 				continue
 			}
 
-			switch msg.ID {
-			case MsgPiece:
-				block, err := parseBlock(msg)
-				if err != nil {
-					return nil, fmt.Errorf("failed to parse block for piece %d: %v", pieceIndex, err)
-				}
+			expectedLength := min(blockSize, pieceLength-block.Begin)
 
-				if block.Index != pieceIndex {
-					return nil, fmt.Errorf("invalid piece block, request %v, got %v", pieceIndex, block.Index)
-				}
-
-				if block.Begin != offset {
-					return nil, fmt.Errorf("invalid piece block offset, request %v, got %v", offset, block.Begin)
-				}
-
-				if block.Begin+len(block.Data) > len(buf) {
-					return nil, fmt.Errorf("piece block exceeds buffer")
-				}
-
-				if len(block.Data) != blockLength {
-					return nil, fmt.Errorf("expected %d bytes, got %d", blockLength, len(block.Data))
-				}
-
-				copy(buf[block.Begin:], block.Data)
-
-				break waitlp
-
-			case MsgChoke:
-				c.Choked = true
-				return nil, fmt.Errorf("peer has choked us")
+			if block.Begin < 0 || block.Begin+len(block.Data) > len(buf) {
+				return nil, fmt.Errorf("piece block exceeds buffer")
 			}
+
+			if len(block.Data) != expectedLength {
+				return nil, fmt.Errorf("expected %d bytes, got %d", expectedLength, len(block.Data))
+			}
+
+			copy(buf[block.Begin:], block.Data)
+			received++
+
+			if err := requestNext(); err != nil {
+				return nil, err
+			}
+
+		case <-c.closeCh:
+			return nil, fmt.Errorf("connection closed while downloading piece %d: %w", pieceIndex, c.ReadErr())
+
+		case <-time.After(blockTimeout):
+			return nil, fmt.Errorf("timed out waiting for block in piece %d", pieceIndex)
 		}
 	}
 

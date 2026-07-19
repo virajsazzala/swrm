@@ -14,44 +14,21 @@ func (c *Client) Interested() error {
 	return nil
 }
 
-func (c *Client) WaitForUnchoke(pieceCount int) error {
-	c.Conn.SetDeadline(time.Now().Add(30 * time.Second))
-	defer c.Conn.SetDeadline(time.Time{})
+func (c *Client) WaitForUnchoke(timeout time.Duration) error {
+	deadline := time.After(timeout)
 
 	for {
-		msg, err := c.ReadMessage()
-		if err != nil {
-			return fmt.Errorf("failed during unchoke wait: %w", err)
-		}
-
-		if msg.KeepAlive {
-			continue
-		}
-
-		switch msg.ID {
-		case MsgUnchoke:
-			c.Choked = false
+		if !c.IsChoked() {
 			return nil
-		case MsgChoke:
-			c.Choked = true
-		case MsgBitfield:
-			bf, err := GetBitfield(msg)
-			if err != nil {
-				return fmt.Errorf("failed to read bitfield: %w", err)
-			}
+		}
 
-			c.Bitfield = bf
-		case MsgHave:
-			pieceIndex, err := parseHave(msg)
-			if err != nil {
-				return fmt.Errorf("failed to read have: %w", err)
-			}
-
-			if c.Bitfield == nil {
-				c.Bitfield = make(Bitfield, (pieceCount+7)/8)
-			}
-
-			c.Bitfield.SetPiece(pieceIndex)
+		select {
+		case <-c.notify:
+			continue
+		case <-c.closeCh:
+			return fmt.Errorf("connection closed while waiting for unchoke: %w", c.ReadErr())
+		case <-deadline:
+			return fmt.Errorf("timed out waiting for unchoke")
 		}
 	}
 }

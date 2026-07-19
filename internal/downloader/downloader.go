@@ -65,13 +65,15 @@ func (d *Downloader) ConnectPeers() error {
 				return
 			}
 
+			client.Start(len(d.Torrent.Pieces))
+
 			err = client.Interested()
 			if err != nil {
 				client.Conn.Close()
 				return
 			}
 
-			err = client.WaitForUnchoke(len(d.Torrent.Pieces))
+			err = client.WaitForUnchoke(30 * time.Second)
 			if err != nil {
 				client.Conn.Close()
 				return
@@ -112,7 +114,7 @@ func (d *Downloader) initializePendingPieces() {
 
 func (d *Downloader) nextJob(worker *Worker) (*downloadJob, bool) {
 	for i, piece := range d.PendingPieces {
-		if !worker.Client.Bitfield.HasPiece(piece) {
+		if !worker.Client.HasPiece(piece) {
 			continue
 		}
 
@@ -127,12 +129,12 @@ func (d *Downloader) nextJob(worker *Worker) (*downloadJob, bool) {
 func (d *Downloader) closeWorkers() {
 	for _, w := range d.Workers {
 		close(w.Jobs)
-		w.Client.Conn.Close()
+		w.Client.Close()
 	}
 }
 
 func (d *Downloader) removeWorker(worker *Worker) {
-	worker.Client.Conn.Close()
+	worker.Client.Close()
 	close(worker.Jobs)
 
 	for i, w := range d.Workers {
