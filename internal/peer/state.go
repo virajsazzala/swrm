@@ -14,7 +14,7 @@ func (c *Client) Interested() error {
 	return nil
 }
 
-func (c *Client) WaitForUnchoke() error {
+func (c *Client) WaitForUnchoke(pieceCount int) error {
 	c.Conn.SetDeadline(time.Now().Add(30 * time.Second))
 	defer c.Conn.SetDeadline(time.Time{})
 
@@ -41,6 +41,17 @@ func (c *Client) WaitForUnchoke() error {
 			}
 
 			c.Bitfield = bf
+		case MsgHave:
+			pieceIndex, err := parseHave(msg)
+			if err != nil {
+				return fmt.Errorf("failed to read have: %w", err)
+			}
+
+			if c.Bitfield == nil {
+				c.Bitfield = make(Bitfield, (pieceCount+7)/8)
+			}
+
+			c.Bitfield.SetPiece(pieceIndex)
 		}
 	}
 }

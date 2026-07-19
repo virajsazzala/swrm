@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"time"
 )
 
 const (
@@ -73,6 +74,9 @@ func (c *Client) WriteMessage(msg *Message) error {
 	} else {
 		data = make([]byte, 4)
 	}
+
+	c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	defer c.Conn.SetWriteDeadline(time.Time{})
 
 	_, err := c.Conn.Write(data)
 	if err != nil {

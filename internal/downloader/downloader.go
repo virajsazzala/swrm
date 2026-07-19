@@ -71,7 +71,7 @@ func (d *Downloader) ConnectPeers() error {
 				return
 			}
 
-			err = client.WaitForUnchoke()
+			err = client.WaitForUnchoke(len(d.Torrent.Pieces))
 			if err != nil {
 				client.Conn.Close()
 				return
