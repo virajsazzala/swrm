@@ -3,8 +3,7 @@ package peer
 import "fmt"
 
 func (c *Client) Interested() error {
-	err := c.WriteMessage(&Message{ID: MsgInterested})
-	if err != nil {
+	if err := c.WriteMessage(&Message{ID: MsgInterested}); err != nil {
 		return fmt.Errorf("failed to send interested message: %w", err)
 	}
 

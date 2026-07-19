@@ -18,13 +18,13 @@ type Downloader struct {
 	Interval int64
 }
 
-func New(t *torrent.Torrent) (*Downloader, error) {
-	p, err := peer.New()
+func New(tor *torrent.Torrent) (*Downloader, error) {
+	peerID, err := peer.New()
 	if err != nil {
 		return nil, fmt.Errorf("error while creating peer id: %w", err)
 	}
 
-	return &Downloader{Torrent: t, PeerID: p, Port: 6881}, nil
+	return &Downloader{Torrent: tor, PeerID: peerID, Port: 6881}, nil
 }
 
 func (d *Downloader) Announce() error {
@@ -41,31 +41,31 @@ func (d *Downloader) Announce() error {
 
 func (d *Downloader) GetReadyPeer() (*peer.Client, error) {
 	for _, p := range d.Peers {
-		con, err := peer.Connect(p, 3*time.Second)
+		client, err := peer.Connect(p, 3*time.Second)
 		if err != nil {
 			// maybe log not able to connect here, later.
 			continue
 		}
 
-		err = con.Handshake(d.Torrent.InfoHash, d.PeerID)
+		err = client.Handshake(d.Torrent.InfoHash, d.PeerID)
 		if err != nil {
-			con.Conn.Close()
+			client.Conn.Close()
 			continue
 		}
 
-		err = con.Interested()
+		err = client.Interested()
 		if err != nil {
-			con.Conn.Close()
+			client.Conn.Close()
 			continue
 		}
 
-		err = con.WaitForUnchoke()
+		err = client.WaitForUnchoke()
 		if err != nil {
-			con.Conn.Close()
+			client.Conn.Close()
 			continue
 		}
 
-		return con, nil
+		return client, nil
 	}
 
 	return nil, fmt.Errorf("no usable peers found")
@@ -83,18 +83,18 @@ func (d *Downloader) Download() error {
 		return fmt.Errorf("error pre-allocating file size: %w", err)
 	}
 
-	rp, err := d.GetReadyPeer()
+	client, err := d.GetReadyPeer()
 	if err != nil {
 		return fmt.Errorf("failed to get ready peer: %w", err)
 	}
-	rp.Conn.Close()
+	// client.Conn.Close()
 
-	tp := len(d.Torrent.Pieces)
-	for cp := 0; cp < tp; {
-		if !rp.Bitfield.HasPiece(cp) {
-			rp.Conn.Close()
+	pieceCount := len(d.Torrent.Pieces)
+	for pieceIndex := 0; pieceIndex < pieceCount; {
+		if !client.Bitfield.HasPiece(pieceIndex) {
+			client.Conn.Close()
 
-			rp, err = d.GetReadyPeer()
+			client, err = d.GetReadyPeer()
 			if err != nil {
 				return fmt.Errorf("failed to get ready peer: %w", err)
 			}
@@ -102,11 +102,11 @@ func (d *Downloader) Download() error {
 			continue
 		}
 
-		pi, err := rp.GetPiece(d.Torrent, cp)
+		piece, err := client.GetPiece(d.Torrent, pieceIndex)
 		if err != nil {
-			rp.Conn.Close()
+			client.Conn.Close()
 
-			rp, err = d.GetReadyPeer()
+			client, err = d.GetReadyPeer()
 			if err != nil {
 				return fmt.Errorf("failed to get ready peer: %w", err)
 			}
@@ -114,20 +114,20 @@ func (d *Downloader) Download() error {
 			continue
 		}
 
-		oset := int64(cp * d.Torrent.PieceLength)
+		offset := int64(pieceIndex * d.Torrent.PieceLength)
 
-		_, err = f.WriteAt(pi.Data, oset)
+		_, err = f.WriteAt(piece.Data, offset)
 		if err != nil {
-			rp.Conn.Close()
-			return fmt.Errorf("failed to write torrent block: %w", err)
+			client.Conn.Close()
+			return fmt.Errorf("failed to write piece to file: %w", err)
 		}
 
-		pct := float64(cp+1) / float64(tp) * 100
-		fmt.Printf("Downloaded piece %d/%d (%.2f%%)\n", cp+1, tp, pct)
+		progress := float64(pieceIndex+1) / float64(pieceCount) * 100
+		fmt.Printf("Downloaded piece %d/%d (%.2f%%)\n", pieceIndex+1, pieceCount, progress)
 
-		cp++
+		pieceIndex++
 	}
 
-	rp.Conn.Close()
+	client.Conn.Close()
 	return nil
 }

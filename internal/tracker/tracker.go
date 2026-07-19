@@ -10,24 +10,24 @@ import (
 	"github.com/virajsazzala/swrm/internal/torrent"
 )
 
-func Announce(t *torrent.Torrent, pid [20]byte, pt uint16) (*Response, error) {
+func Announce(tor *torrent.Torrent, peerID [20]byte, port uint16) (*Response, error) {
 	/*
 		note:
 			better handling for failure, like tracker overload, etc.
 	*/
 	// build url
-	u, err := url.Parse(t.Announce)
+	u, err := url.Parse(tor.Announce)
 	if err != nil {
 		return nil, err
 	}
 
 	q := u.Query()
-	q.Set("info_hash", string(t.InfoHash[:]))
-	q.Set("peer_id", string(pid[:]))
-	q.Set("port", strconv.Itoa(int(pt)))
+	q.Set("info_hash", string(tor.InfoHash[:]))
+	q.Set("peer_id", string(peerID[:]))
+	q.Set("port", strconv.Itoa(int(port)))
 	q.Set("uploaded", "0")
 	q.Set("downloaded", "0")
-	q.Set("left", strconv.FormatInt(t.Length, 10))
+	q.Set("left", strconv.FormatInt(tor.Length, 10))
 	q.Set("compact", "1")
 
 	u.RawQuery = q.Encode()

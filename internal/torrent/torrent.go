@@ -23,13 +23,13 @@ type Torrent struct {
 	CreationDate time.Time
 }
 
-func Open(p string) (*Torrent, error) {
-	d, err := os.ReadFile(p)
+func Open(path string) (*Torrent, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read torrent: %w", err)
 	}
 
-	t, err := Parse(d)
+	t, err := Parse(data)
 	if err != nil {
 		return nil, fmt.Errorf("parse torrent: %w", err)
 	}
@@ -38,12 +38,12 @@ func Open(p string) (*Torrent, error) {
 }
 
 func Parse(b []byte) (*Torrent, error) {
-	v, err := bencode.Unmarshal(b)
+	value, err := bencode.Unmarshal(b)
 	if err != nil {
 		return nil, err
 	}
 
-	r, ok := v.(map[string]any)
+	dict, ok := value.(map[string]any)
 	if !ok {
 		return nil, errors.New("torrent root must be a dictionary")
 	}
@@ -51,45 +51,45 @@ func Parse(b []byte) (*Torrent, error) {
 	t := &Torrent{}
 
 	// get announce
-	s, err := getString(r, "announce", true)
+	str, err := getString(dict, "announce", true)
 	if err != nil {
 		return nil, err
 	}
-	t.Announce = s
+	t.Announce = str
 
 	// get created by
-	s, err = getString(r, "created by", false)
+	str, err = getString(dict, "created by", false)
 	if err != nil {
 		return nil, err
 	}
-	t.CreatedBy = s
+	t.CreatedBy = str
 
 	// get creation date
-	ts, err := getInt(r, "creation date", false)
+	timestamp, err := getInt(dict, "creation date", false)
 	if err != nil {
 		return nil, err
 	}
-	if ts != 0 {
-		t.CreationDate = time.Unix(ts, 0)
+	if timestamp != 0 {
+		t.CreationDate = time.Unix(timestamp, 0)
 	}
 
 	// get comment
-	s, err = getString(r, "comment", false)
+	str, err = getString(dict, "comment", false)
 	if err != nil {
 		return nil, err
 	}
-	t.Comment = s
+	t.Comment = str
 
-	err = parseInfo(t, r)
+	err = parseInfo(t, dict)
 	if err != nil {
 		return nil, err
 	}
 
-	ib, err := findInfoBytes(b)
+	infobytes, err := findInfoBytes(b)
 	if err != nil {
 		return nil, err
 	}
-	t.InfoHash = sha1.Sum(ib)
+	t.InfoHash = sha1.Sum(infobytes)
 
 	return t, nil
 }

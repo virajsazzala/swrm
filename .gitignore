@@ -1,3 +1,5 @@
 assets/
 .env
 TODO.md
+*.iso
+*.txt

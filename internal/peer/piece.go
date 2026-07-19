@@ -35,24 +35,22 @@ func parseBlock(m *Message) (*Block, error) {
 	}, nil
 }
 
-func (c *Client) downloadPiece(pid int, pln int) ([]byte, error) {
-	buf := make([]byte, pln)
-	const bs = 16 * 1024
+func (c *Client) downloadPiece(pieceIndex int, pieceLength int) ([]byte, error) {
+	buf := make([]byte, pieceLength)
+	const blockSize = 16 * 1024
 
-	// for i:=1; i<=bs; i++ {
-	for i := 0; i < pln; i += bs {
-		bl := min(bs, pln-i)
+	for offset := 0; offset < pieceLength; offset += blockSize {
+		blockLength := min(blockSize, pieceLength-offset)
 
-		err := c.Request(pid, i, bl)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get block %v for piece %v", i, pid)
+		if err := c.Request(pieceIndex, offset, blockLength); err != nil {
+			return nil, fmt.Errorf("failed to get block %v for piece %v", offset, pieceIndex)
 		}
 
 	waitlp:
 		for {
 			msg, err := c.ReadMessage()
 			if err != nil {
-				return nil, fmt.Errorf("failed to read piece %v, block %v: %v\n", pid, i, err)
+				return nil, fmt.Errorf("failed to read piece %v, block %v: %v\n", pieceIndex, offset, err)
 			}
 
 			if msg.KeepAlive {
@@ -61,28 +59,28 @@ func (c *Client) downloadPiece(pid int, pln int) ([]byte, error) {
 
 			switch msg.ID {
 			case MsgPiece:
-				pb, err := parseBlock(msg)
+				block, err := parseBlock(msg)
 				if err != nil {
-					return nil, fmt.Errorf("failed to parse block for piece %d: %v", pid, err)
+					return nil, fmt.Errorf("failed to parse block for piece %d: %v", pieceIndex, err)
 				}
 
-				if pb.Index != pid {
-					return nil, fmt.Errorf("invalid piece block, request %v, got %v", pid, pb.Index)
+				if block.Index != pieceIndex {
+					return nil, fmt.Errorf("invalid piece block, request %v, got %v", pieceIndex, block.Index)
 				}
 
-				if pb.Begin != i {
-					return nil, fmt.Errorf("invalid piece block offset, request %v, got %v", i, pb.Begin)
+				if block.Begin != offset {
+					return nil, fmt.Errorf("invalid piece block offset, request %v, got %v", offset, block.Begin)
 				}
 
-				if pb.Begin+len(pb.Data) > len(buf) {
+				if block.Begin+len(block.Data) > len(buf) {
 					return nil, fmt.Errorf("piece block exceeds buffer")
 				}
 
-				if len(pb.Data) != bl {
-					return nil, fmt.Errorf("expected %d bytes, got %d", bl, len(pb.Data))
+				if len(block.Data) != blockLength {
+					return nil, fmt.Errorf("expected %d bytes, got %d", blockLength, len(block.Data))
 				}
 
-				copy(buf[pb.Begin:], pb.Data)
+				copy(buf[block.Begin:], block.Data)
 
 				break waitlp
 
@@ -96,28 +94,28 @@ func (c *Client) downloadPiece(pid int, pln int) ([]byte, error) {
 	return buf, nil
 }
 
-func (c *Client) GetPiece(t *torrent.Torrent, id int) (*Piece, error) {
-	if id < 0 || id >= len(t.Pieces) {
-		return nil, fmt.Errorf("invalid piece index %d", id)
+func (c *Client) GetPiece(t *torrent.Torrent, pieceIndex int) (*Piece, error) {
+	if pieceIndex < 0 || pieceIndex >= len(t.Pieces) {
+		return nil, fmt.Errorf("invalid piece index %d", pieceIndex)
 	}
 
-	ln := t.PieceLength
-	if id == len(t.Pieces)-1 {
+	pieceLength := t.PieceLength
+	if pieceIndex == len(t.Pieces)-1 {
 		rem := int(t.Length % int64(t.PieceLength))
 		if rem != 0 {
-			ln = rem
+			pieceLength = rem
 		}
 	}
 
-	p, err := c.downloadPiece(id, ln)
+	data, err := c.downloadPiece(pieceIndex, pieceLength)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download piece: %w", err)
 	}
 
-	hash := sha1.Sum(p)
-	if hash != t.Pieces[id] {
-		return nil, fmt.Errorf("piece %d failed SHA-1 verification", id)
+	hash := sha1.Sum(data)
+	if hash != t.Pieces[pieceIndex] {
+		return nil, fmt.Errorf("piece %d failed SHA-1 verification", pieceIndex)
 	}
 
-	return &Piece{ID: id, Data: p}, nil
+	return &Piece{ID: pieceIndex, Data: data}, nil
 }

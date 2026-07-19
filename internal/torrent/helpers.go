@@ -4,10 +4,10 @@ import (
 	"fmt"
 )
 
-func getString(root map[string]any, key string, req bool) (string, error) {
+func getString(root map[string]any, key string, required bool) (string, error) {
 	v, ok := root[key]
 	if !ok {
-		if req {
+		if required {
 			return "", fmt.Errorf("missing required field: %s", key)
 		}
 		return "", nil
@@ -21,10 +21,10 @@ func getString(root map[string]any, key string, req bool) (string, error) {
 	return s, nil
 }
 
-func getInt(root map[string]any, key string, req bool) (int64, error) {
+func getInt(root map[string]any, key string, required bool) (int64, error) {
 	v, ok := root[key]
 	if !ok {
-		if req {
+		if required {
 			return 0, fmt.Errorf("missing required field: %s", key)
 		}
 		return 0, nil
@@ -38,10 +38,10 @@ func getInt(root map[string]any, key string, req bool) (int64, error) {
 	return i, nil
 }
 
-func getDict(root map[string]any, key string, req bool) (map[string]any, error) {
+func getDict(root map[string]any, key string, required bool) (map[string]any, error) {
 	v, ok := root[key]
 	if !ok {
-		if req {
+		if required {
 			return nil, fmt.Errorf("missing required field: %s", key)
 		}
 		return nil, nil
@@ -53,5 +53,4 @@ func getDict(root map[string]any, key string, req bool) (map[string]any, error) 
 	}
 
 	return d, nil
-
 }

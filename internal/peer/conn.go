@@ -17,10 +17,15 @@ type Client struct {
 	Interest bool
 }
 
-func Connect(peer tracker.Peer, to time.Duration) (*Client, error) {
-	d := net.Dialer{Timeout: to}
-	addr := net.JoinHostPort(peer.IP.String(), strconv.FormatUint(uint64(peer.Port), 10))
-	conn, err := d.Dial("tcp", addr)
+func Connect(peer tracker.Peer, timeout time.Duration) (*Client, error) {
+	dialer := net.Dialer{Timeout: timeout}
+
+	addr := net.JoinHostPort(
+		peer.IP.String(),
+		strconv.FormatUint(uint64(peer.Port), 10),
+	)
+
+	conn, err := dialer.Dial("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}

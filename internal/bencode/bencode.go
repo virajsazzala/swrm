@@ -7,16 +7,16 @@ import (
 )
 
 func Unmarshal(b []byte) (any, error) {
-	v, n, err := parseValue(b)
+	value, consumed, err := parseValue(b)
 	if err != nil {
 		return nil, err
 	}
 
-	if n < len(b) {
+	if consumed < len(b) {
 		return nil, errors.New("Invalid Bencoded data")
 	}
 
-	return v, nil
+	return value, nil
 }
 
 func parseInt(b []byte) (int64, int, error) {
@@ -31,18 +31,18 @@ func parseInt(b []byte) (int64, int, error) {
 	if len(b) == 0 || b[0] != 'i' {
 		return 0, 0, errors.New("Invalid Bencoded integer")
 	}
-	e := bytes.IndexByte(b, 'e')
+	end := bytes.IndexByte(b, 'e')
 
-	if e == -1 || e == 1 {
+	if end == -1 || end == 1 {
 		return 0, 0, errors.New("Invalid Bencoded integer")
 	}
 
-	n, err := strconv.ParseInt(string(b[1:e]), 10, 64)
+	value, err := strconv.ParseInt(string(b[1:end]), 10, 64)
 	if err != nil {
 		return 0, 0, errors.New("Invalid Bencoded integer")
 	}
 
-	return n, e + 1, nil
+	return value, end + 1, nil
 }
 
 func parseString(b []byte) (string, int, error) {
@@ -50,22 +50,22 @@ func parseString(b []byte) (string, int, error) {
 		note:
 			leading zeros spec compliance - not done yet
 	*/
-	i := bytes.IndexByte(b, ':')
-	if i == -1 {
+	colon := bytes.IndexByte(b, ':')
+	if colon == -1 {
 		return "", 0, errors.New("Invalid Bencoded byte string")
 	}
 
-	l, err := strconv.Atoi(string(b[:i]))
-	if err != nil || l < 0 {
+	length, err := strconv.Atoi(string(b[:colon]))
+	if err != nil || length < 0 {
 		return "", 0, errors.New("Invalid Bencoded byte string")
 	}
 
-	s := b[i+1:]
-	if len(s) < l {
+	data := b[colon+1:]
+	if len(data) < length {
 		return "", 0, errors.New("Invalid Bencoded byte string")
 	}
 
-	return string(s[:l]), l + i + 1, nil
+	return string(data[:length]), length + colon + 1, nil
 }
 
 func parseList(b []byte) ([]any, int, error) {
@@ -74,26 +74,26 @@ func parseList(b []byte) ([]any, int, error) {
 	}
 
 	list := []any{}
-	i := 1
+	offset := 1
 	for {
-		if i >= len(b) {
+		if offset >= len(b) {
 			return nil, 0, errors.New("Unterminated Bencoded list")
 		}
 
-		if b[i] == 'e' {
+		if b[offset] == 'e' {
 			break
 		}
 
-		v, n, err := parseValue(b[i:])
+		value, consumed, err := parseValue(b[offset:])
 		if err != nil {
 			return nil, 0, errors.New("Invalid Bencoded list")
 		}
 
-		list = append(list, v)
-		i = i + n
+		list = append(list, value)
+		offset = offset + consumed
 	}
 
-	return list, i + 1, nil
+	return list, offset + 1, nil
 }
 
 func parseDict(b []byte) (map[string]any, int, error) {
@@ -102,36 +102,36 @@ func parseDict(b []byte) (map[string]any, int, error) {
 	}
 
 	dict := map[string]any{}
-	i := 1
+	offset := 1
 	for {
-		if i >= len(b) {
+		if offset >= len(b) {
 			return nil, 0, errors.New("Unterminated Bencoded dictionary")
 		}
 
-		if b[i] == 'e' {
+		if b[offset] == 'e' {
 			break
 		}
 
-		vs, ns, errs := parseString(b[i:])
-		if errs != nil {
+		key, consumed, err := parseString(b[offset:])
+		if err != nil {
 			return nil, 0, errors.New("Invalid Bencoded dictionary")
 		}
-		i = i + ns
+		offset += consumed
 
-		if i >= len(b) || b[i] == 'e' {
+		if offset >= len(b) || b[offset] == 'e' {
 			return nil, 0, errors.New("Invalid Bencoded dictionary")
 		}
 
-		ve, ne, erre := parseValue(b[i:])
-		if erre != nil {
+		value, valConsumed, err := parseValue(b[offset:])
+		if err != nil {
 			return nil, 0, errors.New("Invalid Bencoded dictionary")
 		}
-		i = i + ne
+		offset += valConsumed
 
-		dict[vs] = ve
+		dict[key] = value
 	}
 
-	return dict, i + 1, nil
+	return dict, offset + 1, nil
 }
 
 func parseValue(b []byte) (any, int, error) {
@@ -154,12 +154,12 @@ func parseValue(b []byte) (any, int, error) {
 }
 
 func ValueSize(b []byte) (int, error) {
-	_, v, err := parseValue(b)
+	_, size, err := parseValue(b)
 	if err != nil {
 		return 0, err
 	}
 
-	return v, nil
+	return size, nil
 }
 
 func ReadString(b []byte) (string, int, error) {

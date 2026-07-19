@@ -11,25 +11,21 @@ import (
 func main() {
 	// test - obviously, not the actual thing
 
-	/* fetch torrent file */
-	// t, err := torrent.Open("./assets/torrent-files/debian-13.6.0-amd64-netinst.iso.torrent")
-	t, err := torrent.Open("./assets/torrent-files/sample.torrent")
+	tor, err := torrent.Open("./assets/torrent-files/sample.torrent")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	d, err := downloader.New(t)
+	dl, err := downloader.New(tor)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	err = d.Announce()
-	if err != nil {
+	if err := dl.Announce(); err != nil {
 		log.Fatal(err)
 	}
 
-	err = d.Download()
-	if err != nil {
+	if err := dl.Download(); err != nil {
 		log.Fatal(err)
 	}
 

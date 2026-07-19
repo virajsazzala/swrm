@@ -14,43 +14,43 @@ func parseInfo(t *Torrent, root map[string]any) error {
 	*/
 
 	// get info map
-	i, err := getDict(root, "info", true)
+	info, err := getDict(root, "info", true)
 	if err != nil {
 		return err
 	}
 
 	// get name from info map
-	s, err := getString(i, "name", true)
+	name, err := getString(info, "name", true)
 	if err != nil {
 		return err
 	}
-	t.Name = s
+	t.Name = name
 
 	// get length from info map
-	n, err := getInt(i, "length", true)
+	length, err := getInt(info, "length", true)
 	if err != nil {
 		return err
 	}
-	if n < 0 {
-		return fmt.Errorf("Invalid length: %v", n)
+	if length < 0 {
+		return fmt.Errorf("Invalid length: %v", length)
 	}
-	t.Length = n
+	t.Length = length
 
 	// get piece length from info map
-	n, err = getInt(i, "piece length", true)
+	pieceLength, err := getInt(info, "piece length", true)
 	if err != nil {
 		return err
 	}
-	if n <= 0 {
-		return fmt.Errorf("Invalid pieces length: %v", n)
+	if pieceLength <= 0 {
+		return fmt.Errorf("Invalid pieces length: %v", pieceLength)
 	}
-	t.PieceLength = int(n)
+	t.PieceLength = int(pieceLength)
 
-	ps, err := getString(i, "pieces", true)
+	pieces, err := getString(info, "pieces", true)
 	if err != nil {
 		return err
 	}
-	t.Pieces, err = splitPieces(ps)
+	t.Pieces, err = splitPieces(pieces)
 	if err != nil {
 		return err
 	}
@@ -59,21 +59,21 @@ func parseInfo(t *Torrent, root map[string]any) error {
 }
 
 func splitPieces(s string) ([][20]byte, error) {
-	pb := []byte(s)
-	pl := len(pb)
-	if pl%20 != 0 || pl == 0 {
-		return nil, fmt.Errorf("Invalid byte count in pieces field: %v", pl)
+	data := []byte(s)
+	count := len(data)
+	if count%20 != 0 || count == 0 {
+		return nil, fmt.Errorf("Invalid byte count in pieces field: %v", count)
 	}
 
-	pr := make([][20]byte, 0, pl/20)
+	pieces := make([][20]byte, 0, count/20)
 
-	for i := 0; i < pl; i += 20 {
-		var h [20]byte
-		copy(h[:], pb[i:i+20])
-		pr = append(pr, h)
+	for i := 0; i < count; i += 20 {
+		var hash [20]byte
+		copy(hash[:], data[i:i+20])
+		pieces = append(pieces, hash)
 	}
 
-	return pr, nil
+	return pieces, nil
 }
 
 func findInfoBytes(b []byte) ([]byte, error) {
@@ -81,36 +81,36 @@ func findInfoBytes(b []byte) ([]byte, error) {
 		return nil, errors.New("torrent root must be a dictionary")
 	}
 
-	i := 1
+	offset := 1
 	for {
-		if i >= len(b) {
+		if offset >= len(b) {
 			return nil, errors.New("unterminated dictionary")
 		}
 
-		if b[i] == 'e' {
+		if b[offset] == 'e' {
 			break
 		}
 
-		k, n, err := bencode.ReadString(b[i:])
+		key, consumed, err := bencode.ReadString(b[offset:])
 		if err != nil {
 			return nil, err
 		}
-		i += n
+		offset += consumed
 
-		if k == "info" {
-			s, err := bencode.ValueSize(b[i:])
+		if key == "info" {
+			size, err := bencode.ValueSize(b[offset:])
 			if err != nil {
 				return nil, err
 			}
-			return b[i : i+s], nil
+			return b[offset : offset+size], nil
 		}
 
-		s, err := bencode.ValueSize(b[i:])
+		size, err := bencode.ValueSize(b[offset:])
 		if err != nil {
 			return nil, err
 		}
 
-		i += s
+		offset += size
 	}
 
 	return nil, fmt.Errorf("Info field not found")

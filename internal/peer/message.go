@@ -34,40 +34,40 @@ func (c *Client) ReadMessage() (*Message, error) {
 		-------------+----+------------
 
 	*/
-	var mlen uint32
-	err := binary.Read(c.Conn, binary.BigEndian, &mlen)
+	var length uint32
+	err := binary.Read(c.Conn, binary.BigEndian, &length)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read length header: %w", err)
 	}
 
-	if mlen == 0 {
+	if length == 0 {
 		return &Message{Payload: nil, KeepAlive: true}, nil
 	}
-	msg := make([]byte, mlen)
-	_, err = io.ReadFull(c.Conn, msg)
+	data := make([]byte, length)
+	_, err = io.ReadFull(c.Conn, data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read payload: %w", err)
 	}
 
-	mid := msg[0]
+	id := data[0]
 
-	return &Message{ID: mid, Payload: msg[1:], KeepAlive: false}, nil
+	return &Message{ID: id, Payload: data[1:], KeepAlive: false}, nil
 }
 
 func (c *Client) WriteMessage(msg *Message) error {
-	var wmsg []byte
+	var data []byte
 	if !msg.KeepAlive {
-		wlen := 4 + 1 + len(msg.Payload)
-		wmsg = make([]byte, wlen)
+		length := 4 + 1 + len(msg.Payload)
+		data = make([]byte, length)
 
-		binary.BigEndian.PutUint32(wmsg[0:4], uint32(len(msg.Payload)+1))
-		wmsg[4] = msg.ID
-		copy(wmsg[5:], msg.Payload)
+		binary.BigEndian.PutUint32(data[0:4], uint32(len(msg.Payload)+1))
+		data[4] = msg.ID
+		copy(data[5:], msg.Payload)
 	} else {
-		wmsg = make([]byte, 4)
+		data = make([]byte, 4)
 	}
 
-	_, err := c.Conn.Write(wmsg)
+	_, err := c.Conn.Write(data)
 	if err != nil {
 		return fmt.Errorf("failed to write message to client: %w", err)
 	}

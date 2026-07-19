@@ -10,8 +10,7 @@ func New() ([20]byte, error) {
 	copy(id[:], "-SW0001-")
 
 	// generate 12 random bytes
-	_, err := rand.Read(id[8:])
-	if err != nil {
+	if _, err := rand.Read(id[8:]); err != nil {
 		return [20]byte{}, err
 	}
 
