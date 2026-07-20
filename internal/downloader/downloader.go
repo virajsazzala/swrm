@@ -61,7 +61,7 @@ func (d *Downloader) ConnectPeers() error {
 
 			err = client.Handshake(d.Torrent.InfoHash, d.PeerID)
 			if err != nil {
-				client.Conn.Close()
+				client.Close()
 				return
 			}
 
@@ -69,13 +69,13 @@ func (d *Downloader) ConnectPeers() error {
 
 			err = client.Interested()
 			if err != nil {
-				client.Conn.Close()
+				client.Close()
 				return
 			}
 
 			err = client.WaitForUnchoke(30 * time.Second)
 			if err != nil {
-				client.Conn.Close()
+				client.Close()
 				return
 			}
 

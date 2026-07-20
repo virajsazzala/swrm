@@ -19,17 +19,17 @@ func TestUnmarshal(t *testing.T) {
 		{
 			name:  "positive integer",
 			input: "i42e",
-			want:  42,
+			want:  int64(42),
 		},
 		{
 			name:  "negative integer",
 			input: "i-42e",
-			want:  -42,
+			want:  int64(-42),
 		},
 		{
 			name:  "zero integer",
 			input: "i0e",
-			want:  0,
+			want:  int64(0),
 		},
 		{
 			name:  "string",
@@ -74,7 +74,7 @@ func TestUnmarshal(t *testing.T) {
 		{
 			name:  "mixed list",
 			input: "li42e3:cate",
-			want:  []any{42, "cat"},
+			want:  []any{int64(42), "cat"},
 		},
 		{
 			name:  "empty dictionary",
@@ -85,7 +85,7 @@ func TestUnmarshal(t *testing.T) {
 			name:  "simple dictionary",
 			input: "d3:agei25e4:name5:Alicee",
 			want: map[string]any{
-				"age":  25,
+				"age":  int64(25),
 				"name": "Alice",
 			},
 		},
@@ -101,7 +101,7 @@ func TestUnmarshal(t *testing.T) {
 			name:  "nested dictionary",
 			input: "d4:listli1ei2eee",
 			want: map[string]any{
-				"list": []any{1, 2},
+				"list": []any{int64(1), int64(2)},
 			},
 		},
 		{
@@ -109,7 +109,7 @@ func TestUnmarshal(t *testing.T) {
 			input: "d4:metad5:admini1eee",
 			want: map[string]any{
 				"meta": map[string]any{
-					"admin": 1,
+					"admin": int64(1),
 				},
 			},
 		},
@@ -141,9 +141,9 @@ func TestUnmarshal(t *testing.T) {
 			name:  "dictionary containing list and dictionary",
 			input: "d4:listli1ei2ee4:metad5:admini1eee",
 			want: map[string]any{
-				"list": []any{1, 2},
+				"list": []any{int64(1), int64(2)},
 				"meta": map[string]any{
-					"admin": 1,
+					"admin": int64(1),
 				},
 			},
 		},
