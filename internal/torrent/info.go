@@ -8,33 +8,32 @@ import (
 )
 
 func parseInfo(t *Torrent, root map[string]any) error {
-	/*
-		todo:
-			support multi file torrents ("files" field)
-	*/
-
 	// get info map
 	info, err := getDict(root, "info", true)
 	if err != nil {
 		return err
 	}
 
-	// get name from info map
 	name, err := getString(info, "name", true)
 	if err != nil {
 		return err
 	}
 	t.Name = name
 
-	// get length from info map
-	length, err := getInt(info, "length", true)
-	if err != nil {
-		return err
+	if filesRaw, ok := info["files"]; ok {
+		if err := parseFiles(t, filesRaw); err != nil {
+			return err
+		}
+	} else {
+		length, err := getInt(info, "length", true)
+		if err != nil {
+			return err
+		}
+		if length < 0 {
+			return fmt.Errorf("Invalid length: %v", length)
+		}
+		t.Length = length
 	}
-	if length < 0 {
-		return fmt.Errorf("Invalid length: %v", length)
-	}
-	t.Length = length
 
 	// get piece length from info map
 	pieceLength, err := getInt(info, "piece length", true)
@@ -56,6 +55,77 @@ func parseInfo(t *Torrent, root map[string]any) error {
 	}
 
 	return nil
+}
+
+func parseFiles(t *Torrent, filesRaw any) error {
+	files, ok := filesRaw.([]any)
+	if !ok {
+		return fmt.Errorf("files field must be a list")
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("files field must not be empty")
+	}
+
+	var offset int64
+	for i, fv := range files {
+		fd, ok := fv.(map[string]any)
+		if !ok {
+			return fmt.Errorf("file entry %d must be a dictionary", i)
+		}
+
+		length, err := getInt(fd, "length", true)
+		if err != nil {
+			return fmt.Errorf("file entry %d: %w", i, err)
+		}
+		if length < 0 {
+			return fmt.Errorf("file entry %d: invalid length: %v", i, length)
+		}
+
+		path, err := parseFilePath(fd, i)
+		if err != nil {
+			return err
+		}
+
+		t.Files = append(t.Files, FileInfo{
+			Path:   path,
+			Length: length,
+			Offset: offset,
+		})
+
+		offset += length
+	}
+
+	t.Length = offset
+
+	return nil
+}
+
+func parseFilePath(fd map[string]any, index int) ([]string, error) {
+	pathRaw, ok := fd["path"]
+	if !ok {
+		return nil, fmt.Errorf("file entry %d: missing path", index)
+	}
+
+	pathList, ok := pathRaw.([]any)
+	if !ok || len(pathList) == 0 {
+		return nil, fmt.Errorf("file entry %d: invalid path", index)
+	}
+
+	path := make([]string, 0, len(pathList))
+	for _, pv := range pathList {
+		component, ok := pv.(string)
+		if !ok {
+			return nil, fmt.Errorf("file entry %d: path component must be a string", index)
+		}
+
+		if component == "" || component == "." || component == ".." {
+			return nil, fmt.Errorf("file entry %d: invalid path component %q", index, component)
+		}
+
+		path = append(path, component)
+	}
+
+	return path, nil
 }
 
 func splitPieces(s string) ([][20]byte, error) {

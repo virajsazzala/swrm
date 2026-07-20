@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -160,16 +159,11 @@ func (d *Downloader) startWorkers(results chan downloadResult) int {
 }
 
 func (d *Downloader) Download() error {
-	f, err := os.OpenFile(d.Torrent.Name, os.O_CREATE|os.O_RDWR, 0666)
+	fw, err := newFileWriter(d.Torrent)
 	if err != nil {
-		return fmt.Errorf("error creating file: %w", err)
+		return fmt.Errorf("error creating output files: %w", err)
 	}
-	defer f.Close()
-
-	err = f.Truncate(d.Torrent.Length)
-	if err != nil {
-		return fmt.Errorf("error pre-allocating file size: %w", err)
-	}
+	defer fw.Close()
 
 	if err := d.ConnectPeers(); err != nil {
 		return fmt.Errorf("failed to connect to peers: %w", err)
@@ -213,9 +207,8 @@ func (d *Downloader) Download() error {
 
 		offset := int64(result.PieceIndex) * int64(d.Torrent.PieceLength)
 
-		_, err = f.WriteAt(result.Piece.Data, offset)
-		if err != nil {
-			return fmt.Errorf("failed to writing piece: %w", err)
+		if err := fw.WriteAt(result.Piece.Data, offset); err != nil {
+			return fmt.Errorf("failed to write piece: %w", err)
 		}
 
 		completed++

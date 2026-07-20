@@ -10,17 +10,30 @@ import (
 	"github.com/virajsazzala/swrm/internal/bencode"
 )
 
-type Torrent struct {
-	Announce    string
-	Name        string
-	Length      int64
-	PieceLength int
-	Pieces      [][20]byte
-	InfoHash    [20]byte
+type FileInfo struct {
+	Path   []string
+	Length int64
+	Offset int64
+}
 
+type Torrent struct {
+	Announce     string
+	Name         string
+	Length       int64
+	PieceLength  int
+	Pieces       [][20]byte
+	InfoHash     [20]byte
+	Files        []FileInfo
 	Comment      string
 	CreatedBy    string
 	CreationDate time.Time
+}
+
+func (t *Torrent) FileList() []FileInfo {
+	if len(t.Files) > 0 {
+		return t.Files
+	}
+	return []FileInfo{{Path: []string{t.Name}, Length: t.Length, Offset: 0}}
 }
 
 func Open(path string) (*Torrent, error) {

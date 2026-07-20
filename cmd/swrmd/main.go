@@ -12,7 +12,7 @@ func main() {
 	// test - obviously, not the actual thing
 
 	// tor, err := torrent.Open("./assets/torrent-files/sample.torrent")
-	tor, err := torrent.Open("./assets/torrent-files/debian-13.6.0-amd64-netinst.iso.torrent")
+	tor, err := torrent.Open("./assets/torrent-files/big-buck-bunny.torrent")
 	if err != nil {
 		log.Fatal(err)
 	}
