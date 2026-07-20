@@ -134,13 +134,7 @@ func (c *Client) GetPiece(ctx context.Context, t *torrent.Torrent, pieceIndex in
 		return nil, fmt.Errorf("invalid piece index %d", pieceIndex)
 	}
 
-	pieceLength := t.PieceLength
-	if pieceIndex == len(t.Pieces)-1 {
-		rem := int(t.Length % int64(t.PieceLength))
-		if rem != 0 {
-			pieceLength = rem
-		}
-	}
+	pieceLength := t.PieceByteLength(pieceIndex)
 
 	data, err := c.downloadPiece(ctx, pieceIndex, pieceLength)
 	if err != nil {

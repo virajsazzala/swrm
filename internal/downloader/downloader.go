@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"crypto/sha1"
 	"fmt"
 	"log/slog"
 	"math"
@@ -260,14 +261,34 @@ func addJitter(d time.Duration, frac float64) time.Duration {
 	return result
 }
 
-func (d *Downloader) initializePendingPieces() {
-	d.PendingPieces = make([]int, len(d.Torrent.Pieces))
+func (d *Downloader) initializePendingPieces(fw *fileWriter) {
+	d.PendingPieces = nil
+	d.pieceFailures = make(map[int]int)
 
-	for i := range d.PendingPieces {
-		d.PendingPieces[i] = i
+	pieceCount := len(d.Torrent.Pieces)
+	buf := make([]byte, d.Torrent.PieceLength)
+	alreadyComplete := 0
+
+	for i := 0; i < pieceCount; i++ {
+		pieceLength := d.Torrent.PieceByteLength(i)
+		offset := int64(i) * int64(d.Torrent.PieceLength)
+
+		if err := fw.ReadAt(buf[:pieceLength], offset); err != nil {
+			d.PendingPieces = append(d.PendingPieces, i)
+			continue
+		}
+
+		if sha1.Sum(buf[:pieceLength]) == d.Torrent.Pieces[i] {
+			alreadyComplete++
+			continue
+		}
+
+		d.PendingPieces = append(d.PendingPieces, i)
 	}
 
-	d.pieceFailures = make(map[int]int)
+	if alreadyComplete > 0 {
+		d.logger.Info("resumed from existing data", "already_complete", alreadyComplete, "total", pieceCount)
+	}
 }
 
 func (d *Downloader) nextJob(worker *Worker) (*downloadJob, bool) {
@@ -340,17 +361,18 @@ func (d *Downloader) Download(ctx context.Context) error {
 
 	defer d.closeWorkers()
 
-	d.initializePendingPieces()
+	d.initializePendingPieces(fw)
+
+	pieceCount := len(d.Torrent.Pieces)
+	completed := pieceCount - len(d.PendingPieces)
+	startProgress := math.Round(float64(completed)/float64(pieceCount)*10000) / 100
+	lastMilestone := int(startProgress) / 10
 
 	results := make(chan downloadResult)
 
 	activeWorkers, idleWorkers := d.startWorkers(ctx, results)
 
-	completed := 0
-	pieceCount := len(d.Torrent.Pieces)
-	lastMilestone := -1
-
-	d.logger.Info("download started", "pieces", pieceCount, "workers", activeWorkers)
+	d.logger.Info("download started", "pieces", pieceCount, "pending", len(d.PendingPieces), "workers", activeWorkers)
 
 	for completed < pieceCount {
 		if activeWorkers == 0 {

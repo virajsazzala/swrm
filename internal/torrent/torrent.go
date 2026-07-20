@@ -37,6 +37,15 @@ func (t *Torrent) FileList() []FileInfo {
 	return []FileInfo{{Path: []string{t.Name}, Length: t.Length, Offset: 0}}
 }
 
+func (t *Torrent) PieceByteLength(index int) int {
+	if index == len(t.Pieces)-1 {
+		if rem := int(t.Length % int64(t.PieceLength)); rem != 0 {
+			return rem
+		}
+	}
+	return t.PieceLength
+}
+
 func (t *Torrent) Trackers() []string {
 	var ordered []string
 	seen := make(map[string]bool)

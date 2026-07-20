@@ -82,6 +82,32 @@ func (fw *fileWriter) WriteAt(data []byte, offset int64) error {
 	return nil
 }
 
+func (fw *fileWriter) ReadAt(buf []byte, offset int64) error {
+	remaining := buf
+	pos := offset
+
+	for len(remaining) > 0 {
+		of, localOffset, err := fw.locate(pos)
+		if err != nil {
+			return err
+		}
+
+		readLen := int64(len(remaining))
+		if maxLen := of.length - localOffset; readLen > maxLen {
+			readLen = maxLen
+		}
+
+		if _, err := of.f.ReadAt(remaining[:readLen], localOffset); err != nil {
+			return fmt.Errorf("failed to read at offset %d: %w", pos, err)
+		}
+
+		remaining = remaining[readLen:]
+		pos += readLen
+	}
+
+	return nil
+}
+
 func (fw *fileWriter) locate(pos int64) (openFile, int64, error) {
 	for _, of := range fw.files {
 		if pos >= of.offset && pos < of.offset+of.length {
