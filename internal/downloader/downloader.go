@@ -372,12 +372,6 @@ func (d *Downloader) Download(ctx context.Context) error {
 	}
 	defer fw.Close()
 
-	if err := d.ConnectPeers(ctx); err != nil {
-		return fmt.Errorf("failed to connect to peers: %w", err)
-	}
-
-	defer d.closeWorkers()
-
 	bytesDownloaded := d.initializePendingPieces(fw)
 
 	pieceCount := len(d.Torrent.Pieces)
@@ -387,7 +381,27 @@ func (d *Downloader) Download(ctx context.Context) error {
 
 	results := make(chan downloadResult)
 
-	activeWorkers, idleWorkers := d.startWorkers(ctx, results)
+	var activeWorkers int
+	var idleWorkers []*Worker
+
+	if completed < pieceCount {
+		if err := d.ConnectPeers(ctx); err == nil {
+			activeWorkers, idleWorkers = d.startWorkers(ctx, results)
+		}
+
+		if activeWorkers == 0 {
+			d.closeWorkerList(idleWorkers)
+			idleWorkers = nil
+			d.Workers = nil
+
+			activeWorkers, idleWorkers, err = d.reconnectWithBackoff(ctx, defaultReconnectConfig, results)
+			if err != nil {
+				return fmt.Errorf("failed to connect to peers: %w", err)
+			}
+		}
+	}
+
+	defer d.closeWorkers()
 
 	d.logger.Info("download started", "pieces", pieceCount, "pending", len(d.PendingPieces), "workers", activeWorkers)
 
@@ -398,6 +412,7 @@ func (d *Downloader) Download(ctx context.Context) error {
 		if activeWorkers == 0 {
 			d.closeWorkerList(idleWorkers)
 			idleWorkers = nil
+			d.Workers = nil
 
 			active, idle, err := d.reconnectWithBackoff(ctx, defaultReconnectConfig, results)
 			if err != nil {

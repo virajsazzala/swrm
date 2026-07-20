@@ -25,6 +25,8 @@ const (
 	udpDialTimeout = 5 * time.Second
 	udpBaseTimeout = 15 * time.Second
 	udpMaxRetries  = 3
+
+	udpRecvBufferSize = 20 + maxPeersPerAnnounce*6 + 512
 )
 
 func announceUDP(ctx context.Context, logger *slog.Logger, u *url.URL, tor *torrent.Torrent, peerID [20]byte, port uint16, event Event) (*Response, error) {
@@ -155,7 +157,7 @@ func udpAnnounce(ctx context.Context, logger *slog.Logger, conn *net.UDPConn, co
 }
 
 func udpRoundTrip(ctx context.Context, logger *slog.Logger, conn *net.UDPConn, req []byte, minRespLen int) ([]byte, error) {
-	buf := make([]byte, 2048)
+	buf := make([]byte, udpRecvBufferSize)
 
 	var lastErr error
 	for attempt := 0; attempt <= udpMaxRetries; attempt++ {

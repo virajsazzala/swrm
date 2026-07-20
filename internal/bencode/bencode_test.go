@@ -2,14 +2,11 @@ package bencode
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
 func TestUnmarshal(t *testing.T) {
-	/*
-		note:
-			add test cases for leading zeros, etc.
-	*/
 	tests := []struct {
 		name    string
 		input   string
@@ -147,6 +144,46 @@ func TestUnmarshal(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:    "leading plus sign on integer",
+			input:   "i+42e",
+			wantErr: true,
+		},
+		{
+			name:    "negative zero",
+			input:   "i-0e",
+			wantErr: true,
+		},
+		{
+			name:    "leading zero on positive integer",
+			input:   "i03e",
+			wantErr: true,
+		},
+		{
+			name:    "leading zero on negative integer",
+			input:   "i-03e",
+			wantErr: true,
+		},
+		{
+			name:    "bare minus sign",
+			input:   "i-e",
+			wantErr: true,
+		},
+		{
+			name:  "zero is the only valid single-digit zero form",
+			input: "i0e",
+			want:  int64(0),
+		},
+		{
+			name:    "leading plus sign on string length (as dict key)",
+			input:   "d+3:foo3:bare",
+			wantErr: true,
+		},
+		{
+			name:    "leading zero on string length (as dict key)",
+			input:   "d03:foo3:bare",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -168,5 +205,17 @@ func TestUnmarshal(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUnmarshalDepthGuard(t *testing.T) {
+	atLimit := strings.Repeat("l", 1000) + strings.Repeat("e", 1000)
+	if _, err := Unmarshal([]byte(atLimit)); err != nil {
+		t.Fatalf("1000 levels of nesting should be allowed, got error: %v", err)
+	}
+
+	beyondLimit := strings.Repeat("l", 1001) + strings.Repeat("e", 1001)
+	if _, err := Unmarshal([]byte(beyondLimit)); err == nil {
+		t.Fatal("1001 levels of nesting should be rejected, got no error")
 	}
 }
