@@ -261,13 +261,27 @@ func addJitter(d time.Duration, frac float64) time.Duration {
 	return result
 }
 
-func (d *Downloader) initializePendingPieces(fw *fileWriter) {
+func computeRateAndETA(bytesSinceLastMilestone int64, elapsed time.Duration, remainingBytes int64) (bytesPerSec float64, etaSeconds float64) {
+	if elapsed <= 0 {
+		return 0, -1
+	}
+
+	bytesPerSec = float64(bytesSinceLastMilestone) / elapsed.Seconds()
+	if bytesPerSec <= 0 {
+		return bytesPerSec, -1
+	}
+
+	return bytesPerSec, float64(remainingBytes) / bytesPerSec
+}
+
+func (d *Downloader) initializePendingPieces(fw *fileWriter) int64 {
 	d.PendingPieces = nil
 	d.pieceFailures = make(map[int]int)
 
 	pieceCount := len(d.Torrent.Pieces)
 	buf := make([]byte, d.Torrent.PieceLength)
 	alreadyComplete := 0
+	var bytesDownloaded int64
 
 	for i := 0; i < pieceCount; i++ {
 		pieceLength := d.Torrent.PieceByteLength(i)
@@ -280,6 +294,7 @@ func (d *Downloader) initializePendingPieces(fw *fileWriter) {
 
 		if sha1.Sum(buf[:pieceLength]) == d.Torrent.Pieces[i] {
 			alreadyComplete++
+			bytesDownloaded += int64(pieceLength)
 			continue
 		}
 
@@ -289,6 +304,8 @@ func (d *Downloader) initializePendingPieces(fw *fileWriter) {
 	if alreadyComplete > 0 {
 		d.logger.Info("resumed from existing data", "already_complete", alreadyComplete, "total", pieceCount)
 	}
+
+	return bytesDownloaded
 }
 
 func (d *Downloader) nextJob(worker *Worker) (*downloadJob, bool) {
@@ -361,7 +378,7 @@ func (d *Downloader) Download(ctx context.Context) error {
 
 	defer d.closeWorkers()
 
-	d.initializePendingPieces(fw)
+	bytesDownloaded := d.initializePendingPieces(fw)
 
 	pieceCount := len(d.Torrent.Pieces)
 	completed := pieceCount - len(d.PendingPieces)
@@ -373,6 +390,9 @@ func (d *Downloader) Download(ctx context.Context) error {
 	activeWorkers, idleWorkers := d.startWorkers(ctx, results)
 
 	d.logger.Info("download started", "pieces", pieceCount, "pending", len(d.PendingPieces), "workers", activeWorkers)
+
+	lastMilestoneTime := time.Now()
+	bytesAtLastMilestone := bytesDownloaded
 
 	for completed < pieceCount {
 		if activeWorkers == 0 {
@@ -417,6 +437,7 @@ func (d *Downloader) Download(ctx context.Context) error {
 			}
 
 			completed++
+			bytesDownloaded += int64(d.Torrent.PieceByteLength(result.PieceIndex))
 
 			progress := math.Round(float64(completed)/float64(pieceCount)*10000) / 100
 
@@ -425,8 +446,20 @@ func (d *Downloader) Download(ctx context.Context) error {
 
 			if milestone := int(progress) / 10; milestone > lastMilestone {
 				lastMilestone = milestone
+
+				now := time.Now()
+				bytesPerSec, etaSeconds := computeRateAndETA(
+					bytesDownloaded-bytesAtLastMilestone,
+					now.Sub(lastMilestoneTime),
+					d.Torrent.Length-bytesDownloaded,
+				)
+
 				d.logger.Info("download progress", "completed", completed, "total", pieceCount,
-					"progress_pct", progress, "pending", len(d.PendingPieces), "active_workers", activeWorkers)
+					"progress_pct", progress, "pending", len(d.PendingPieces), "active_workers", activeWorkers,
+					"bytes_per_sec", int64(math.Round(bytesPerSec)), "eta_seconds", int64(math.Round(etaSeconds)))
+
+				lastMilestoneTime = now
+				bytesAtLastMilestone = bytesDownloaded
 			}
 
 			if job, ok := d.nextJob(result.Worker); ok {
