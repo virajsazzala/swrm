@@ -91,6 +91,15 @@ func (fw *fileWriter) locate(pos int64) (openFile, int64, error) {
 	return openFile{}, 0, fmt.Errorf("offset %d out of range", pos)
 }
 
+func (fw *fileWriter) Sync() error {
+	for _, of := range fw.files {
+		if err := of.f.Sync(); err != nil {
+			return fmt.Errorf("failed to sync %s: %w", of.f.Name(), err)
+		}
+	}
+	return nil
+}
+
 func (fw *fileWriter) Close() {
 	for _, of := range fw.files {
 		if of.f != nil {

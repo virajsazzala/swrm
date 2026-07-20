@@ -1,7 +1,9 @@
 package downloader
 
 import (
-	"fmt"
+	"context"
+	"log/slog"
+
 	"github.com/virajsazzala/swrm/internal/peer"
 	"github.com/virajsazzala/swrm/internal/torrent"
 )
@@ -23,15 +25,19 @@ type Worker struct {
 	Torrent *torrent.Torrent
 	Jobs    chan downloadJob
 	Results chan<- downloadResult
+	logger  *slog.Logger
 }
 
-func (w *Worker) Run() {
+func (w *Worker) Run(ctx context.Context) {
 	for job := range w.Jobs {
+		w.logger.Debug("downloading piece", "piece", job.PieceIndex)
+		piece, err := w.Client.GetPiece(ctx, w.Torrent, job.PieceIndex)
+		w.logger.Debug("finished piece", "piece", job.PieceIndex)
 
-		fmt.Printf("[Worker %02d] downloading piece %d\n", w.ID, job.PieceIndex)
-		piece, err := w.Client.GetPiece(w.Torrent, job.PieceIndex)
-		fmt.Printf("[Worker %02d] finished piece %d\n", w.ID, job.PieceIndex)
-
-		w.Results <- downloadResult{Worker: w, PieceIndex: job.PieceIndex, Piece: piece, Err: err}
+		select {
+		case w.Results <- downloadResult{Worker: w, PieceIndex: job.PieceIndex, Piece: piece, Err: err}:
+		case <-ctx.Done():
+			return
+		}
 	}
 }

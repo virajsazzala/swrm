@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
@@ -42,7 +43,7 @@ func parseBlock(m *Message) (*Block, error) {
 	}, nil
 }
 
-func (c *Client) downloadPiece(pieceIndex int, pieceLength int) ([]byte, error) {
+func (c *Client) downloadPiece(ctx context.Context, pieceIndex int, pieceLength int) ([]byte, error) {
 	buf := make([]byte, pieceLength)
 
 	var offsets []int
@@ -109,6 +110,9 @@ func (c *Client) downloadPiece(pieceIndex int, pieceLength int) ([]byte, error) 
 		case <-c.closeCh:
 			return nil, fmt.Errorf("connection closed while downloading piece %d: %w", pieceIndex, c.ReadErr())
 
+		case <-ctx.Done():
+			return nil, ctx.Err()
+
 		case <-time.After(blockTimeout):
 			return nil, fmt.Errorf("timed out waiting for block in piece %d", pieceIndex)
 		}
@@ -117,7 +121,7 @@ func (c *Client) downloadPiece(pieceIndex int, pieceLength int) ([]byte, error) 
 	return buf, nil
 }
 
-func (c *Client) GetPiece(t *torrent.Torrent, pieceIndex int) (*Piece, error) {
+func (c *Client) GetPiece(ctx context.Context, t *torrent.Torrent, pieceIndex int) (*Piece, error) {
 	if pieceIndex < 0 || pieceIndex >= len(t.Pieces) {
 		return nil, fmt.Errorf("invalid piece index %d", pieceIndex)
 	}
@@ -130,7 +134,7 @@ func (c *Client) GetPiece(t *torrent.Torrent, pieceIndex int) (*Piece, error) {
 		}
 	}
 
-	data, err := c.downloadPiece(pieceIndex, pieceLength)
+	data, err := c.downloadPiece(ctx, pieceIndex, pieceLength)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download piece: %w", err)
 	}

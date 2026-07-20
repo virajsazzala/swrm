@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -14,7 +15,7 @@ func (c *Client) Interested() error {
 	return nil
 }
 
-func (c *Client) WaitForUnchoke(timeout time.Duration) error {
+func (c *Client) WaitForUnchoke(ctx context.Context, timeout time.Duration) error {
 	deadline := time.After(timeout)
 
 	for {
@@ -27,6 +28,8 @@ func (c *Client) WaitForUnchoke(timeout time.Duration) error {
 			continue
 		case <-c.closeCh:
 			return fmt.Errorf("connection closed while waiting for unchoke: %w", c.ReadErr())
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-deadline:
 			return fmt.Errorf("timed out waiting for unchoke")
 		}

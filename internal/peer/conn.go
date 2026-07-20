@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
@@ -27,28 +28,26 @@ type Client struct {
 	closeOnce  sync.Once
 }
 
-func Connect(peer tracker.Peer, timeout time.Duration) (*Client, error) {
+func Connect(ctx context.Context, peer tracker.Peer, timeout time.Duration) (*Client, error) {
 	dialer := net.Dialer{Timeout: timeout}
+	addr := net.JoinHostPort(peer.IP.String(), strconv.FormatUint(uint64(peer.Port), 10))
 
-	addr := net.JoinHostPort(
-		peer.IP.String(),
-		strconv.FormatUint(uint64(peer.Port), 10),
-	)
-
-	conn, err := dialer.Dial("tcp", addr)
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
 
-	return &Client{Conn: conn, choked: true}, nil
+	return &Client{
+		Conn:    conn,
+		choked:  true,
+		closeCh: make(chan struct{}),
+		blocks:  make(chan *Block, 4*pipelineDepth),
+		notify:  make(chan struct{}, 1),
+	}, nil
 }
 
 func (c *Client) Start(pieceCount int) {
 	c.pieceCount = pieceCount
-	c.blocks = make(chan *Block, 4*pipelineDepth)
-	c.notify = make(chan struct{}, 1)
-	c.closeCh = make(chan struct{})
-
 	go c.readLoop()
 }
 
