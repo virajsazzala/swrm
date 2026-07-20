@@ -3,9 +3,13 @@ package torrent
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strings"
 
 	"github.com/virajsazzala/swrm/internal/bencode"
 )
+
+const maxPieceLength = 256 * 1024 * 1024
 
 func parseInfo(t *Torrent, root map[string]any) error {
 	// get info map
@@ -17,6 +21,9 @@ func parseInfo(t *Torrent, root map[string]any) error {
 	name, err := getString(info, "name", true)
 	if err != nil {
 		return err
+	}
+	if !isSafePathComponent(name) {
+		return fmt.Errorf("invalid torrent name %q", name)
 	}
 	t.Name = name
 
@@ -42,6 +49,9 @@ func parseInfo(t *Torrent, root map[string]any) error {
 	}
 	if pieceLength <= 0 {
 		return fmt.Errorf("Invalid pieces length: %v", pieceLength)
+	}
+	if pieceLength > maxPieceLength {
+		return fmt.Errorf("piece length %d exceeds maximum allowed %d", pieceLength, maxPieceLength)
 	}
 	t.PieceLength = int(pieceLength)
 
@@ -79,6 +89,9 @@ func parseFiles(t *Torrent, filesRaw any) error {
 		}
 		if length < 0 {
 			return fmt.Errorf("file entry %d: invalid length: %v", i, length)
+		}
+		if offset > math.MaxInt64-length {
+			return fmt.Errorf("file entry %d: cumulative length overflows", i)
 		}
 
 		path, err := parseFilePath(fd, i)
@@ -118,7 +131,7 @@ func parseFilePath(fd map[string]any, index int) ([]string, error) {
 			return nil, fmt.Errorf("file entry %d: path component must be a string", index)
 		}
 
-		if component == "" || component == "." || component == ".." {
+		if !isSafePathComponent(component) {
 			return nil, fmt.Errorf("file entry %d: invalid path component %q", index, component)
 		}
 
@@ -126,6 +139,19 @@ func parseFilePath(fd map[string]any, index int) ([]string, error) {
 	}
 
 	return path, nil
+}
+
+func isSafePathComponent(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	if strings.ContainsAny(s, "/\\") {
+		return false
+	}
+	if strings.ContainsRune(s, 0) {
+		return false
+	}
+	return true
 }
 
 func splitPieces(s string) ([][20]byte, error) {
