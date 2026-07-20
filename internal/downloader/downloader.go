@@ -35,19 +35,44 @@ var defaultReconnectConfig = ReconnectConfig{
 	AnnounceTimeout: 90 * time.Second,
 }
 
+type Progress struct {
+	Completed     int
+	Total         int
+	Pending       int
+	ActiveWorkers int
+	BytesPerSec   float64
+	ETASeconds    float64
+}
+
 type Downloader struct {
-	Torrent       *torrent.Torrent
-	PeerID        [20]byte
-	Port          uint16
-	OutputDir     string
-	Peers         []tracker.Peer
-	Workers       []*Worker
-	PendingPieces []int
-	Interval      int64
-	pieceFailures map[int]int
-	logger        *slog.Logger
-	baseLogger    *slog.Logger
-	announced     bool
+	Torrent        *torrent.Torrent
+	PeerID         [20]byte
+	Port           uint16
+	OutputDir      string
+	Peers          []tracker.Peer
+	Workers        []*Worker
+	PendingPieces  []int
+	Interval       int64
+	OnProgress     func(Progress)
+	OnReconnecting func(attempt int)
+	pieceFailures  map[int]int
+	logger         *slog.Logger
+	baseLogger     *slog.Logger
+	announced      bool
+}
+
+func (d *Downloader) emitProgress(completed, total, pending, activeWorkers int, bytesPerSec, etaSeconds float64) {
+	if d.OnProgress == nil {
+		return
+	}
+	d.OnProgress(Progress{
+		Completed:     completed,
+		Total:         total,
+		Pending:       pending,
+		ActiveWorkers: activeWorkers,
+		BytesPerSec:   bytesPerSec,
+		ETASeconds:    etaSeconds,
+	})
 }
 
 func New(tor *torrent.Torrent, logger *slog.Logger) (*Downloader, error) {
@@ -236,6 +261,9 @@ func (d *Downloader) reconnectWithBackoff(ctx context.Context, cfg ReconnectConf
 			wait = cfg.MaxDelay
 		}
 
+		if d.OnReconnecting != nil {
+			d.OnReconnecting(attempt)
+		}
 		d.logger.Warn("reconnect attempt failed", "attempt", attempt, "wait", wait.Round(time.Second), "err", lastErr)
 
 		select {
@@ -407,6 +435,12 @@ func (d *Downloader) Download(ctx context.Context) error {
 
 	lastMilestoneTime := time.Now()
 	bytesAtLastMilestone := bytesDownloaded
+	lastBytesPerSec, lastETASeconds := 0.0, -1.0
+
+	d.emitProgress(completed, pieceCount, len(d.PendingPieces), activeWorkers, lastBytesPerSec, lastETASeconds)
+	defer func() {
+		d.emitProgress(completed, pieceCount, len(d.PendingPieces), activeWorkers, lastBytesPerSec, lastETASeconds)
+	}()
 
 	for completed < pieceCount {
 		if activeWorkers == 0 {
@@ -475,7 +509,10 @@ func (d *Downloader) Download(ctx context.Context) error {
 
 				lastMilestoneTime = now
 				bytesAtLastMilestone = bytesDownloaded
+				lastBytesPerSec, lastETASeconds = bytesPerSec, etaSeconds
 			}
+
+			d.emitProgress(completed, pieceCount, len(d.PendingPieces), activeWorkers, lastBytesPerSec, lastETASeconds)
 
 			if job, ok := d.nextJob(result.Worker); ok {
 				result.Worker.Jobs <- *job
