@@ -23,11 +23,11 @@ const (
 
 const (
 	udpDialTimeout = 5 * time.Second
-	udpReadTimeout = 10 * time.Second
-	udpMaxRetries  = 2
+	udpBaseTimeout = 15 * time.Second
+	udpMaxRetries  = 3
 )
 
-func announceUDP(ctx context.Context, logger *slog.Logger, u *url.URL, tor *torrent.Torrent, peerID [20]byte, port uint16) (*Response, error) {
+func announceUDP(ctx context.Context, logger *slog.Logger, u *url.URL, tor *torrent.Torrent, peerID [20]byte, port uint16, event Event) (*Response, error) {
 	var dialer net.Dialer
 	dialCtx, cancel := context.WithTimeout(ctx, udpDialTimeout)
 	defer cancel()
@@ -51,7 +51,7 @@ func announceUDP(ctx context.Context, logger *slog.Logger, u *url.URL, tor *torr
 		return nil, fmt.Errorf("udp connect: %w", err)
 	}
 
-	resp, err := udpAnnounce(ctx, logger, udpConn, connID, tor, peerID, port)
+	resp, err := udpAnnounce(ctx, logger, udpConn, connID, tor, peerID, port, event)
 	if err != nil {
 		return nil, fmt.Errorf("udp announce: %w", err)
 	}
@@ -99,7 +99,7 @@ func udpConnect(ctx context.Context, logger *slog.Logger, conn *net.UDPConn) (ui
 	return binary.BigEndian.Uint64(resp[8:16]), nil
 }
 
-func udpAnnounce(ctx context.Context, logger *slog.Logger, conn *net.UDPConn, connID uint64, tor *torrent.Torrent, peerID [20]byte, port uint16) (*Response, error) {
+func udpAnnounce(ctx context.Context, logger *slog.Logger, conn *net.UDPConn, connID uint64, tor *torrent.Torrent, peerID [20]byte, port uint16, event Event) (*Response, error) {
 	transactionID, err := randUint32()
 	if err != nil {
 		return nil, err
@@ -118,8 +118,8 @@ func udpAnnounce(ctx context.Context, logger *slog.Logger, conn *net.UDPConn, co
 	binary.BigEndian.PutUint64(req[56:64], 0)                  // downloaded
 	binary.BigEndian.PutUint64(req[64:72], uint64(tor.Length)) // left
 	binary.BigEndian.PutUint64(req[72:80], 0)                  // uploaded
-	binary.BigEndian.PutUint32(req[80:84], 0)                  // event - none (matches the HTTP path)
-	binary.BigEndian.PutUint32(req[84:88], 0)                  // IP - let the tracker use the packet's source IP
+	binary.BigEndian.PutUint32(req[80:84], event.udpValue())
+	binary.BigEndian.PutUint32(req[84:88], 0) // IP - let the tracker use the packet's source IP
 	binary.BigEndian.PutUint32(req[88:92], key)
 	binary.BigEndian.PutUint32(req[92:96], 0xFFFFFFFF) // num_want: default
 	binary.BigEndian.PutUint16(req[96:98], port)
@@ -167,20 +167,21 @@ func udpRoundTrip(ctx context.Context, logger *slog.Logger, conn *net.UDPConn, r
 			return nil, fmt.Errorf("write: %w", err)
 		}
 
-		conn.SetReadDeadline(time.Now().Add(udpReadTimeout))
+		timeout := udpBaseTimeout * time.Duration(1<<attempt)
+		conn.SetReadDeadline(time.Now().Add(timeout))
 		n, err := conn.Read(buf)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
 			lastErr = err
-			logger.Debug("udp round trip attempt failed", "attempt", attempt, "err", err)
+			logger.Debug("udp round trip attempt failed", "attempt", attempt, "timeout", timeout, "err", err)
 			continue
 		}
 
 		if n < minRespLen {
 			lastErr = fmt.Errorf("response too short: %d bytes", n)
-			logger.Debug("udp round trip attempt failed", "attempt", attempt, "err", lastErr)
+			logger.Debug("udp round trip attempt failed", "attempt", attempt, "timeout", timeout, "err", lastErr)
 			continue
 		}
 

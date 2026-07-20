@@ -64,8 +64,19 @@ func parseInfo(t *Torrent, root map[string]any) error {
 		return err
 	}
 
+	expectedPieces := t.Length / int64(t.PieceLength)
+	if t.Length%int64(t.PieceLength) != 0 {
+		expectedPieces++
+	}
+	if int64(len(t.Pieces)) != expectedPieces {
+		return fmt.Errorf("piece count %d doesn't match expected %d for length %d and piece length %d",
+			len(t.Pieces), expectedPieces, t.Length, t.PieceLength)
+	}
+
 	return nil
 }
+
+const maxFileCount = 10000
 
 func parseFiles(t *Torrent, filesRaw any) error {
 	files, ok := filesRaw.([]any)
@@ -75,7 +86,11 @@ func parseFiles(t *Torrent, filesRaw any) error {
 	if len(files) == 0 {
 		return fmt.Errorf("files field must not be empty")
 	}
+	if len(files) > maxFileCount {
+		return fmt.Errorf("torrent declares %d files, exceeding maximum allowed %d", len(files), maxFileCount)
+	}
 
+	seenPaths := make(map[string]bool, len(files))
 	var offset int64
 	for i, fv := range files {
 		fd, ok := fv.(map[string]any)
@@ -98,6 +113,12 @@ func parseFiles(t *Torrent, filesRaw any) error {
 		if err != nil {
 			return err
 		}
+
+		key := strings.Join(path, "/")
+		if seenPaths[key] {
+			return fmt.Errorf("file entry %d: duplicate path %q", i, key)
+		}
+		seenPaths[key] = true
 
 		t.Files = append(t.Files, FileInfo{
 			Path:   path,

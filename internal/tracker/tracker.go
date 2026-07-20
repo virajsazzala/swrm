@@ -23,7 +23,42 @@ const (
 	maxPeersPerAnnounce = 1000
 )
 
-func Announce(ctx context.Context, logger *slog.Logger, tor *torrent.Torrent, peerID [20]byte, port uint16) (*Response, error) {
+type Event int
+
+const (
+	EventNone Event = iota
+	EventStarted
+	EventCompleted
+	EventStopped
+)
+
+func (e Event) httpValue() string {
+	switch e {
+	case EventStarted:
+		return "started"
+	case EventCompleted:
+		return "completed"
+	case EventStopped:
+		return "stopped"
+	default:
+		return ""
+	}
+}
+
+func (e Event) udpValue() uint32 {
+	switch e {
+	case EventCompleted:
+		return 1
+	case EventStarted:
+		return 2
+	case EventStopped:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func Announce(ctx context.Context, logger *slog.Logger, tor *torrent.Torrent, peerID [20]byte, port uint16, event Event) (*Response, error) {
 	urls := tor.Trackers()
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("torrent has no tracker urls")
@@ -47,9 +82,9 @@ func Announce(ctx context.Context, logger *slog.Logger, tor *torrent.Torrent, pe
 		var resp *Response
 		switch u.Scheme {
 		case "http", "https":
-			resp, err = announceHTTP(ctx, u, tor, peerID, port)
+			resp, err = announceHTTP(ctx, u, tor, peerID, port, event)
 		case "udp":
-			resp, err = announceUDP(ctx, logger, u, tor, peerID, port)
+			resp, err = announceUDP(ctx, logger, u, tor, peerID, port, event)
 		default:
 			errs = append(errs, fmt.Errorf("%s: unsupported tracker scheme %q", raw, u.Scheme))
 			continue
@@ -75,7 +110,7 @@ func Announce(ctx context.Context, logger *slog.Logger, tor *torrent.Torrent, pe
 	return nil, fmt.Errorf("all trackers failed: %w", errors.Join(errs...))
 }
 
-func announceHTTP(ctx context.Context, u *url.URL, tor *torrent.Torrent, peerID [20]byte, port uint16) (*Response, error) {
+func announceHTTP(ctx context.Context, u *url.URL, tor *torrent.Torrent, peerID [20]byte, port uint16, event Event) (*Response, error) {
 	q := u.Query()
 	q.Set("info_hash", string(tor.InfoHash[:]))
 	q.Set("peer_id", string(peerID[:]))
@@ -84,6 +119,9 @@ func announceHTTP(ctx context.Context, u *url.URL, tor *torrent.Torrent, peerID 
 	q.Set("downloaded", "0")
 	q.Set("left", strconv.FormatInt(tor.Length, 10))
 	q.Set("compact", "1")
+	if ev := event.httpValue(); ev != "" {
+		q.Set("event", ev)
+	}
 
 	u.RawQuery = q.Encode()
 

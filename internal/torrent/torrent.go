@@ -60,7 +60,17 @@ func (t *Torrent) Trackers() []string {
 	return ordered
 }
 
+const maxTorrentFileSize = 10 * 1024 * 1024
+
 func Open(path string) (*Torrent, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat torrent: %w", err)
+	}
+	if info.Size() > maxTorrentFileSize {
+		return nil, fmt.Errorf("torrent file exceeds maximum allowed size of %d bytes", maxTorrentFileSize)
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read torrent: %w", err)

@@ -2,6 +2,7 @@ package tracker
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/virajsazzala/swrm/internal/bencode"
 )
@@ -20,6 +21,10 @@ func parseResponse(body []byte) (*Response, error) {
 	dict, ok := value.(map[string]any)
 	if !ok {
 		return nil, errors.New("tracker response root must be a dictionary")
+	}
+
+	if reason, ok := dict["failure reason"].(string); ok {
+		return nil, fmt.Errorf("tracker returned failure: %s", reason)
 	}
 
 	// parse peers

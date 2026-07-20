@@ -47,12 +47,14 @@ func (c *Client) downloadPiece(ctx context.Context, pieceIndex int, pieceLength 
 	buf := make([]byte, pieceLength)
 
 	var offsets []int
+	validOffsets := make(map[int]bool)
 	for offset := 0; offset < pieceLength; offset += blockSize {
 		offsets = append(offsets, offset)
+		validOffsets[offset] = true
 	}
 
 	next := 0
-	received := 0
+	received := make(map[int]bool, len(offsets))
 
 	requestNext := func() error {
 		if next >= len(offsets) {
@@ -75,7 +77,7 @@ func (c *Client) downloadPiece(ctx context.Context, pieceIndex int, pieceLength 
 		}
 	}
 
-	for received < len(offsets) {
+	for len(received) < len(offsets) {
 		if c.IsChoked() {
 			return nil, fmt.Errorf("peer choked us mid-piece %d", pieceIndex)
 		}
@@ -90,9 +92,13 @@ func (c *Client) downloadPiece(ctx context.Context, pieceIndex int, pieceLength 
 				continue
 			}
 
+			if !validOffsets[block.Begin] {
+				return nil, fmt.Errorf("received block at unrequested offset %d for piece %d", block.Begin, pieceIndex)
+			}
+
 			expectedLength := min(blockSize, pieceLength-block.Begin)
 
-			if block.Begin < 0 || block.Begin+len(block.Data) > len(buf) {
+			if block.Begin+len(block.Data) > len(buf) {
 				return nil, fmt.Errorf("piece block exceeds buffer")
 			}
 
@@ -100,11 +106,13 @@ func (c *Client) downloadPiece(ctx context.Context, pieceIndex int, pieceLength 
 				return nil, fmt.Errorf("expected %d bytes, got %d", expectedLength, len(block.Data))
 			}
 
-			copy(buf[block.Begin:], block.Data)
-			received++
+			if !received[block.Begin] {
+				copy(buf[block.Begin:], block.Data)
+				received[block.Begin] = true
 
-			if err := requestNext(); err != nil {
-				return nil, err
+				if err := requestNext(); err != nil {
+					return nil, err
+				}
 			}
 
 		case <-c.closeCh:

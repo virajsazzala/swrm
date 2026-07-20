@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/virajsazzala/swrm/internal/downloader"
 	"github.com/virajsazzala/swrm/internal/torrent"
@@ -46,11 +47,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := dl.Download(ctx); err != nil {
-		logger.Error("download failed", "err", err)
+	downloadErr := dl.Download(ctx)
+
+	notifyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if downloadErr != nil {
+		dl.AnnounceStopped(notifyCtx)
+		logger.Error("download failed", "err", downloadErr)
 		os.Exit(1)
 	}
 
+	dl.AnnounceCompleted(notifyCtx)
 	logger.Info("download completed successfully")
 }
 

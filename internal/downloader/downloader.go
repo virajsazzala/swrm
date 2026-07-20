@@ -19,17 +19,19 @@ const maxConcurrentDials = 50
 const maxPieceFailures = 8
 
 type ReconnectConfig struct {
-	MaxElapsed time.Duration
-	BaseDelay  time.Duration
-	MaxDelay   time.Duration
-	JitterFrac float64
+	MaxElapsed      time.Duration
+	BaseDelay       time.Duration
+	MaxDelay        time.Duration
+	JitterFrac      float64
+	AnnounceTimeout time.Duration
 }
 
 var defaultReconnectConfig = ReconnectConfig{
-	MaxElapsed: 10 * time.Minute,
-	BaseDelay:  2 * time.Second,
-	MaxDelay:   60 * time.Second,
-	JitterFrac: 0.3,
+	MaxElapsed:      10 * time.Minute,
+	BaseDelay:       2 * time.Second,
+	MaxDelay:        60 * time.Second,
+	JitterFrac:      0.3,
+	AnnounceTimeout: 90 * time.Second,
 }
 
 type Downloader struct {
@@ -43,6 +45,7 @@ type Downloader struct {
 	pieceFailures map[int]int
 	logger        *slog.Logger
 	baseLogger    *slog.Logger
+	announced     bool
 }
 
 func New(tor *torrent.Torrent, logger *slog.Logger) (*Downloader, error) {
@@ -65,15 +68,39 @@ func New(tor *torrent.Torrent, logger *slog.Logger) (*Downloader, error) {
 }
 
 func (d *Downloader) Announce(ctx context.Context) error {
-	resp, err := tracker.Announce(ctx, d.baseLogger.With("component", "tracker"), d.Torrent, d.PeerID, d.Port)
+	event := tracker.EventNone
+	if !d.announced {
+		event = tracker.EventStarted
+	}
+
+	resp, err := tracker.Announce(ctx, d.baseLogger.With("component", "tracker"), d.Torrent, d.PeerID, d.Port, event)
 	if err != nil {
 		return fmt.Errorf("error while announcing: %w", err)
 	}
 
+	d.announced = true
 	d.Peers = resp.Peers
 	d.Interval = resp.Interval
 
 	return nil
+}
+
+func (d *Downloader) AnnounceCompleted(ctx context.Context) {
+	if !d.announced {
+		return
+	}
+	if _, err := tracker.Announce(ctx, d.baseLogger.With("component", "tracker"), d.Torrent, d.PeerID, d.Port, tracker.EventCompleted); err != nil {
+		d.logger.Warn("failed to notify tracker of completion", "err", err)
+	}
+}
+
+func (d *Downloader) AnnounceStopped(ctx context.Context) {
+	if !d.announced {
+		return
+	}
+	if _, err := tracker.Announce(ctx, d.baseLogger.With("component", "tracker"), d.Torrent, d.PeerID, d.Port, tracker.EventStopped); err != nil {
+		d.logger.Warn("failed to notify tracker of stop", "err", err)
+	}
 }
 
 func (d *Downloader) ConnectPeers(ctx context.Context) error {
@@ -158,7 +185,7 @@ func (d *Downloader) ConnectPeers(ctx context.Context) error {
 	return nil
 }
 
-func (d *Downloader) reconnectWithBackoff(ctx context.Context, cfg ReconnectConfig) error {
+func (d *Downloader) reconnectWithBackoff(ctx context.Context, cfg ReconnectConfig, results chan downloadResult) (int, []*Worker, error) {
 	deadline := time.Now().Add(cfg.MaxElapsed)
 	delay := cfg.BaseDelay
 	attempt := 0
@@ -167,21 +194,32 @@ func (d *Downloader) reconnectWithBackoff(ctx context.Context, cfg ReconnectConf
 	for {
 		attempt++
 
-		err := d.Announce(ctx)
+		announceCtx, cancel := context.WithTimeout(ctx, cfg.AnnounceTimeout)
+		err := d.Announce(announceCtx)
+		cancel()
+
 		if err == nil {
 			err = d.ConnectPeers(ctx)
 		}
+
+		var active int
+		var idle []*Worker
 		if err == nil {
-			return nil
+			active, idle = d.startWorkers(ctx, results)
+			if active > 0 {
+				return active, idle, nil
+			}
+			d.closeWorkerList(idle)
+			err = fmt.Errorf("connected to %d peer(s) but none hold any pending piece", len(d.Workers))
 		}
 		lastErr = err
 
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, nil, err
 		}
 
 		if time.Now().After(deadline) {
-			return fmt.Errorf("giving up reconnecting after %d attempts: %w", attempt, lastErr)
+			return 0, nil, fmt.Errorf("giving up reconnecting after %d attempts: %w", attempt, lastErr)
 		}
 
 		wait := delay
@@ -199,7 +237,7 @@ func (d *Downloader) reconnectWithBackoff(ctx context.Context, cfg ReconnectConf
 
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return 0, nil, ctx.Err()
 		case <-time.After(wait):
 		}
 
@@ -245,7 +283,11 @@ func (d *Downloader) nextJob(worker *Worker) (*downloadJob, bool) {
 }
 
 func (d *Downloader) closeWorkers() {
-	for _, w := range d.Workers {
+	d.closeWorkerList(d.Workers)
+}
+
+func (d *Downloader) closeWorkerList(workers []*Worker) {
+	for _, w := range workers {
 		close(w.Jobs)
 		w.Client.Close()
 	}
@@ -263,8 +305,9 @@ func (d *Downloader) removeWorker(worker *Worker) {
 	}
 }
 
-func (d *Downloader) startWorkers(ctx context.Context, results chan downloadResult) int {
+func (d *Downloader) startWorkers(ctx context.Context, results chan downloadResult) (int, []*Worker) {
 	active := 0
+	var idle []*Worker
 	for _, worker := range d.Workers {
 		worker.Results = results
 		go worker.Run(ctx)
@@ -272,9 +315,11 @@ func (d *Downloader) startWorkers(ctx context.Context, results chan downloadResu
 		if job, ok := d.nextJob(worker); ok {
 			worker.Jobs <- *job
 			active++
+		} else {
+			idle = append(idle, worker)
 		}
 	}
-	return active
+	return active, idle
 }
 
 func (d *Downloader) Download(ctx context.Context) error {
@@ -295,9 +340,9 @@ func (d *Downloader) Download(ctx context.Context) error {
 
 	d.initializePendingPieces()
 
-	results := make(chan downloadResult, len(d.Workers))
+	results := make(chan downloadResult)
 
-	activeWorkers := d.startWorkers(ctx, results)
+	activeWorkers, idleWorkers := d.startWorkers(ctx, results)
 
 	completed := 0
 	pieceCount := len(d.Torrent.Pieces)
@@ -305,7 +350,20 @@ func (d *Downloader) Download(ctx context.Context) error {
 
 	d.logger.Info("download started", "pieces", pieceCount, "workers", activeWorkers)
 
-	for completed < pieceCount && activeWorkers > 0 {
+	for completed < pieceCount {
+		if activeWorkers == 0 {
+			d.closeWorkerList(idleWorkers)
+			idleWorkers = nil
+
+			active, idle, err := d.reconnectWithBackoff(ctx, defaultReconnectConfig, results)
+			if err != nil {
+				return fmt.Errorf("couldn't recover peer connections: %w", err)
+			}
+
+			activeWorkers, idleWorkers = active, idle
+			continue
+		}
+
 		var result downloadResult
 		select {
 		case <-ctx.Done():
@@ -327,46 +385,46 @@ func (d *Downloader) Download(ctx context.Context) error {
 			}
 
 			d.PendingPieces = append(d.PendingPieces, result.PieceIndex)
+		} else {
+			offset := int64(result.PieceIndex) * int64(d.Torrent.PieceLength)
 
-			if len(d.Workers) == 0 {
-				if err := d.reconnectWithBackoff(ctx, defaultReconnectConfig); err != nil {
-					return fmt.Errorf("couldn't recover peer connections: %w", err)
-				}
-
-				activeWorkers += d.startWorkers(ctx, results)
+			if err := fw.WriteAt(result.Piece.Data, offset); err != nil {
+				return fmt.Errorf("failed to write piece: %w", err)
 			}
 
-			continue
+			completed++
+
+			progress := math.Round(float64(completed)/float64(pieceCount)*10000) / 100
+
+			d.logger.Debug("piece downloaded", "piece", result.PieceIndex, "worker_id", result.Worker.ID,
+				"completed", completed, "total", pieceCount, "progress_pct", progress)
+
+			if milestone := int(progress) / 10; milestone > lastMilestone {
+				lastMilestone = milestone
+				d.logger.Info("download progress", "completed", completed, "total", pieceCount,
+					"progress_pct", progress, "pending", len(d.PendingPieces), "active_workers", activeWorkers)
+			}
+
+			if job, ok := d.nextJob(result.Worker); ok {
+				result.Worker.Jobs <- *job
+				activeWorkers++
+			} else {
+				idleWorkers = append(idleWorkers, result.Worker)
+			}
 		}
 
-		offset := int64(result.PieceIndex) * int64(d.Torrent.PieceLength)
-
-		if err := fw.WriteAt(result.Piece.Data, offset); err != nil {
-			return fmt.Errorf("failed to write piece: %w", err)
+		if len(idleWorkers) > 0 {
+			var stillIdle []*Worker
+			for _, w := range idleWorkers {
+				if job, ok := d.nextJob(w); ok {
+					w.Jobs <- *job
+					activeWorkers++
+				} else {
+					stillIdle = append(stillIdle, w)
+				}
+			}
+			idleWorkers = stillIdle
 		}
-
-		completed++
-
-		progress := math.Round(float64(completed)/float64(pieceCount)*10000) / 100
-
-		d.logger.Debug("piece downloaded", "piece", result.PieceIndex, "worker_id", result.Worker.ID,
-			"completed", completed, "total", pieceCount, "progress_pct", progress)
-
-		if milestone := int(progress) / 10; milestone > lastMilestone {
-			lastMilestone = milestone
-			d.logger.Info("download progress", "completed", completed, "total", pieceCount,
-				"progress_pct", progress, "pending", len(d.PendingPieces), "active_workers", activeWorkers)
-		}
-
-		job, ok := d.nextJob(result.Worker)
-		if ok {
-			result.Worker.Jobs <- *job
-			activeWorkers++
-		}
-	}
-
-	if completed != pieceCount {
-		return fmt.Errorf("download incomplete")
 	}
 
 	if err := fw.Sync(); err != nil {
