@@ -38,6 +38,7 @@ type Downloader struct {
 	Torrent       *torrent.Torrent
 	PeerID        [20]byte
 	Port          uint16
+	OutputDir     string
 	Peers         []tracker.Peer
 	Workers       []*Worker
 	PendingPieces []int
@@ -62,6 +63,7 @@ func New(tor *torrent.Torrent, logger *slog.Logger) (*Downloader, error) {
 		Torrent:    tor,
 		PeerID:     peerID,
 		Port:       6881,
+		OutputDir:  ".",
 		logger:     logger.With("component", "downloader"),
 		baseLogger: logger,
 	}, nil
@@ -326,7 +328,7 @@ func (d *Downloader) Download(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	fw, err := newFileWriter(d.Torrent)
+	fw, err := newFileWriter(d.Torrent, d.OutputDir)
 	if err != nil {
 		return fmt.Errorf("error creating output files: %w", err)
 	}

@@ -17,6 +17,7 @@ import (
 
 func main() {
 	torrentPath := flag.String("torrent", "./assets/torrent-files/big-buck-bunny.torrent", "path to the .torrent file")
+	outputDir := flag.String("output-dir", ".", "directory to write downloaded files to")
 	logLevel := flag.String("log-level", "info", "log verbosity: debug, info, warn, error")
 	logFormat := flag.String("log-format", "text", "log output format: text, json")
 	flag.Parse()
@@ -41,6 +42,7 @@ func main() {
 		logger.Error("failed to initialize downloader", "err", err)
 		os.Exit(1)
 	}
+	dl.OutputDir = *outputDir
 
 	if err := dl.Announce(ctx); err != nil {
 		logger.Error("announce failed", "err", err)

@@ -18,17 +18,17 @@ type openFile struct {
 	length int64
 }
 
-func newFileWriter(t *torrent.Torrent) (*fileWriter, error) {
+func newFileWriter(t *torrent.Torrent, outputDir string) (*fileWriter, error) {
 	fw := &fileWriter{}
 	multiFile := len(t.Files) > 0
 
 	for _, fi := range t.FileList() {
 		var fullPath string
 		if multiFile {
-			parts := append([]string{t.Name}, fi.Path...)
+			parts := append([]string{outputDir, t.Name}, fi.Path...)
 			fullPath = filepath.Join(parts...)
 		} else {
-			fullPath = fi.Path[0]
+			fullPath = filepath.Join(outputDir, fi.Path[0])
 		}
 
 		if dir := filepath.Dir(fullPath); dir != "." {
